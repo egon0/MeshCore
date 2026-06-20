@@ -428,10 +428,39 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
+  // [fwd-filter Stage 1] Net-health: throttle forwarding of unidentifiable 1-byte path-hash traffic
+  // (1-byte hashes collide in a 256-value space, so large networks can't attribute them; pushes
+  // nodes to multibyte). hashfilter_mode: 0=off, 1=adverts only, 2=all. prob = % chance to drop.
+  if (_fwd_prefs.hashfilter_mode != 0 && packet->getPathHashSize() == 1) {
+    bool is_advert = packet->getPayloadType() == PAYLOAD_TYPE_ADVERT;
+    if ((_fwd_prefs.hashfilter_mode == 2 || is_advert)
+        && (int)(rand() % 100) < _fwd_prefs.hashfilter_prob) {
+      MESH_DEBUG_PRINTLN("fwd-filter: drop 1-byte %s (hashfilter mode=%d prob=%d)",
+                         is_advert ? "advert" : "pkt", (int)_fwd_prefs.hashfilter_mode,
+                         (int)_fwd_prefs.hashfilter_prob);
+      return false;
+    }
+  }
+  // [fwd-filter Stage 2] Suppress adverts originated by a blacklisted node (DROP_ADVERT), at any
+  // hash size. An advert's payload begins with the originator's full pub_key -> exact identity match.
+  if (_fwd_prefs.block_count > 0 && packet->getPayloadType() == PAYLOAD_TYPE_ADVERT
+      && packet->payload_len >= PUB_KEY_SIZE) {
+    for (uint8_t k = 0; k < _fwd_prefs.block_count; k++) {
+      if ((_fwd_prefs.block_actions[k] & FWD_BLOCK_DROP_ADVERT)
+          && memcmp(packet->payload, _fwd_prefs.block_keys[k], PUB_KEY_SIZE) == 0) {
+        MESH_DEBUG_PRINTLN("fwd-filter: drop advert from blocklisted node (entry %d)", (int)k);
+        return false;
+      }
+    }
+  }
   if (packet->isRouteFlood()) {
     if (packet->getPathHashCount() >= _prefs.flood_max) return false;
     if (packet->getRouteType() == ROUTE_TYPE_FLOOD && packet->getPathHashCount() >= _prefs.flood_max_unscoped) return false;
     if (packet->getPayloadType() == PAYLOAD_TYPE_ADVERT && packet->getPathHashCount() >= _prefs.flood_max_advert) return false;
+    // [fwd-filter / PR #2797] per-payload flood hop caps (default 64 = no-op)
+    if (packet->getPayloadType() == PAYLOAD_TYPE_REQ && packet->getPathHashCount() >= _fwd_prefs.flood_max_request) return false;
+    if (packet->getPayloadType() == PAYLOAD_TYPE_ANON_REQ && packet->getPathHashCount() >= _fwd_prefs.flood_max_anon_request) return false;
+    if (packet->getPayloadType() == PAYLOAD_TYPE_RESPONSE && packet->getPathHashCount() >= _fwd_prefs.flood_max_response) return false;
   }
   if (packet->isRouteFlood() && recv_pkt_region == NULL) {
     MESH_DEBUG_PRINTLN("allowPacketForward: unknown transport code, or wildcard not allowed for FLOOD packet");
@@ -561,6 +590,50 @@ bool MyMesh::filterRecvFloodPacket(mesh::Packet* pkt) {
     }
   } else {
     recv_pkt_region = NULL;
+  }
+  // [fwd-filter Stage 2] Prune flood copies whose path traverses a blacklisted node (PRUNE_IF_IN_PATH).
+  // Called before hasSeen(): returning true drops THIS copy without marking it seen, so a copy via a
+  // different/better path can still win. Path entries are hash prefixes, reliable only at multibyte
+  // sizes (1-byte handled broadly by the hash-size filter).
+  if (_fwd_prefs.block_count > 0) {
+    uint8_t sz = pkt->getPathHashSize();
+    uint8_t n = pkt->getPathHashCount();
+    for (uint8_t h = 0; h < n; h++) {
+      const uint8_t* hop = &pkt->path[h * sz];
+      for (uint8_t k = 0; k < _fwd_prefs.block_count; k++) {
+        if ((_fwd_prefs.block_actions[k] & FWD_BLOCK_PRUNE_PATH)
+            && memcmp(hop, _fwd_prefs.block_keys[k], sz) == 0) {
+          MESH_DEBUG_PRINTLN("fwd-filter: prune %d-byte flood via blocklisted hop (hop %d/%d entry %d)",
+                             (int)sz, (int)h, (int)n, (int)k);
+          return true;  // drop this copy; not marked seen
+        }
+      }
+    }
+  }
+  // [fwd-filter Stage 3] Last-hop WHITELIST: only relay a flood if its immediate sender (the last path
+  // hop) is allow-listed. Exemptions prevent admin lockout: adverts (neighbour learning), ANON_REQ
+  // (login/initial contact), and floods addressed to this node always pass. Matched at the packet's
+  // hash size (collision-prone at 1-byte -- operator should also enable `fwd.hashfilter all`).
+  if (_fwd_prefs.whitelist_mode != 0) {
+    uint8_t ptype = pkt->getPayloadType();
+    if (ptype == PAYLOAD_TYPE_ADVERT || ptype == PAYLOAD_TYPE_ANON_REQ) return false;  // exempt
+    if ((ptype == PAYLOAD_TYPE_TXT_MSG || ptype == PAYLOAD_TYPE_REQ
+         || ptype == PAYLOAD_TYPE_RESPONSE || ptype == PAYLOAD_TYPE_PATH)
+        && pkt->payload_len >= 1 && self_id.isHashMatch(&pkt->payload[0])) return false;  // for us
+    uint8_t n = pkt->getPathHashCount();
+    if (n == 0) {   // 0-hop flood: heard directly, originator not identifiable
+      if (_fwd_prefs.whitelist_zerohop) return false;   // allow
+      MESH_DEBUG_PRINTLN("fwd-filter: drop 0-hop flood (whitelist, 0hop=drop)");
+      return true;                                      // drop
+    }
+    uint8_t sz = pkt->getPathHashSize();
+    const uint8_t* last = &pkt->path[(n - 1) * sz];   // immediate sender = last appended hop
+    for (uint8_t k = 0; k < _fwd_prefs.whitelist_count; k++) {
+      if (memcmp(last, _fwd_prefs.whitelist_keys[k], sz) == 0) return false;  // whitelisted -> relay
+    }
+    MESH_DEBUG_PRINTLN("fwd-filter: drop %d-byte flood, last-hop not whitelisted (%d entries)",
+                       (int)sz, (int)_fwd_prefs.whitelist_count);
+    return true;  // last hop not whitelisted -> drop (not marked seen)
   }
   // do normal processing
   return false;
@@ -929,6 +1002,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
+  _fwd_prefs.load(_fs);   // fork-private forward-filter prefs from /fwd_prefs (independent of /com_prefs)
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
@@ -1257,9 +1331,181 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+  } else if (handleFwdCommand(command, reply)) {
+    // fork-private forward-filter command (fwd.* / flood.max.*request|response) handled in-place;
+    // intercepted here so it works over BOTH serial and RF admin without touching CommonCLI.
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
+}
+
+// Handles the fork-private forward-filter CLI surface. Returns true (and fills `reply`) iff `command`
+// is one of ours; returns false (leaving `reply` untouched) so non-fwd commands fall through to
+// CommonCLI. Operates on _fwd_prefs and persists to /fwd_prefs only -- never touches /com_prefs.
+bool MyMesh::handleFwdCommand(char* command, char* reply) {
+  if (memcmp(command, "set ", 4) == 0) {
+    char* config = command + 4;
+    if (memcmp(config, "fwd.hashfilter.prob ", 20) == 0) {
+      _fwd_prefs.hashfilter_prob = constrain(atoi(&config[20]), 0, 100);
+      _fwd_prefs.save(_fs); strcpy(reply, "OK");
+    } else if (memcmp(config, "fwd.hashfilter ", 15) == 0) {
+      config += 15;
+      if (memcmp(config, "off", 3) == 0) { _fwd_prefs.hashfilter_mode = 0; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else if (memcmp(config, "advert", 6) == 0) { _fwd_prefs.hashfilter_mode = 1; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else if (memcmp(config, "all", 3) == 0) { _fwd_prefs.hashfilter_mode = 2; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, must be off, advert, or all");
+    } else if (memcmp(config, "fwd.block.add ", 14) == 0) {
+      char buf[160];
+      strncpy(buf, &config[14], sizeof(buf) - 1); buf[sizeof(buf) - 1] = 0;
+      uint8_t actions = FWD_BLOCK_PRUNE_PATH;   // default: path-prune (steering)
+      char* sp = strchr(buf, ' ');
+      if (sp) {
+        *sp = 0;
+        const char* fl = sp + 1;
+        if (memcmp(fl, "both", 4) == 0) actions = FWD_BLOCK_PRUNE_PATH | FWD_BLOCK_DROP_ADVERT;
+        else if (memcmp(fl, "advert", 6) == 0) actions = FWD_BLOCK_DROP_ADVERT;
+        else if (memcmp(fl, "prune", 5) == 0) actions = FWD_BLOCK_PRUNE_PATH;
+      }
+      uint8_t key[PUB_KEY_SIZE];
+      if (strlen(buf) != PUB_KEY_SIZE * 2 || !mesh::Utils::fromHex(key, PUB_KEY_SIZE, buf)) {
+        strcpy(reply, "Error: need 64-hex pubkey [prune|advert|both]");
+      } else if (_fwd_prefs.block_count >= FWD_BLOCK_MAX) {
+        strcpy(reply, "Error: table full");
+      } else {
+        int idx = -1;
+        for (int k = 0; k < _fwd_prefs.block_count; k++)
+          if (memcmp(_fwd_prefs.block_keys[k], key, PUB_KEY_SIZE) == 0) { idx = k; break; }
+        if (idx < 0) { idx = _fwd_prefs.block_count++; memcpy(_fwd_prefs.block_keys[idx], key, PUB_KEY_SIZE); }
+        _fwd_prefs.block_actions[idx] = actions;
+        _fwd_prefs.save(_fs);
+        strcpy(reply, "OK");
+      }
+    } else if (memcmp(config, "fwd.block.del ", 14) == 0) {
+      const char* hex = &config[14];
+      uint8_t key[PUB_KEY_SIZE];
+      int klen = min((int)strlen(hex), PUB_KEY_SIZE * 2) / 2;
+      int removed = 0;
+      if (klen >= 1 && mesh::Utils::fromHex(key, klen, hex)) {
+        for (int k = 0; k < _fwd_prefs.block_count; ) {
+          if (memcmp(_fwd_prefs.block_keys[k], key, klen) == 0) {
+            for (int j = k; j < _fwd_prefs.block_count - 1; j++) {
+              memcpy(_fwd_prefs.block_keys[j], _fwd_prefs.block_keys[j + 1], PUB_KEY_SIZE);
+              _fwd_prefs.block_actions[j] = _fwd_prefs.block_actions[j + 1];
+            }
+            _fwd_prefs.block_count--; removed++;
+          } else k++;
+        }
+      }
+      _fwd_prefs.save(_fs);
+      sprintf(reply, "OK (%d removed)", removed);
+    } else if (memcmp(config, "fwd.block.clear", 15) == 0) {
+      _fwd_prefs.block_count = 0;
+      _fwd_prefs.save(_fs);
+      strcpy(reply, "OK");
+    } else if (memcmp(config, "fwd.whitelist.0hop ", 19) == 0) {
+      config += 19;
+      if (memcmp(config, "allow", 5) == 0) { _fwd_prefs.whitelist_zerohop = 1; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else if (memcmp(config, "drop", 4) == 0) { _fwd_prefs.whitelist_zerohop = 0; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, must be allow or drop");
+    } else if (memcmp(config, "fwd.whitelist.add ", 18) == 0) {
+      const char* hex = &config[18];
+      uint8_t key[PUB_KEY_SIZE];
+      if (strlen(hex) != PUB_KEY_SIZE * 2 || !mesh::Utils::fromHex(key, PUB_KEY_SIZE, hex)) {
+        strcpy(reply, "Error: need 64-hex pubkey");
+      } else if (_fwd_prefs.whitelist_count >= FWD_WL_MAX) {
+        strcpy(reply, "Error: table full");
+      } else {
+        int idx = -1;
+        for (int k = 0; k < _fwd_prefs.whitelist_count; k++)
+          if (memcmp(_fwd_prefs.whitelist_keys[k], key, PUB_KEY_SIZE) == 0) { idx = k; break; }
+        if (idx < 0) { idx = _fwd_prefs.whitelist_count++; memcpy(_fwd_prefs.whitelist_keys[idx], key, PUB_KEY_SIZE); }
+        _fwd_prefs.save(_fs);
+        strcpy(reply, "OK");
+      }
+    } else if (memcmp(config, "fwd.whitelist.del ", 18) == 0) {
+      const char* hex = &config[18];
+      uint8_t key[PUB_KEY_SIZE];
+      int klen = min((int)strlen(hex), PUB_KEY_SIZE * 2) / 2;
+      int removed = 0;
+      if (klen >= 1 && mesh::Utils::fromHex(key, klen, hex)) {
+        for (int k = 0; k < _fwd_prefs.whitelist_count; ) {
+          if (memcmp(_fwd_prefs.whitelist_keys[k], key, klen) == 0) {
+            for (int j = k; j < _fwd_prefs.whitelist_count - 1; j++)
+              memcpy(_fwd_prefs.whitelist_keys[j], _fwd_prefs.whitelist_keys[j + 1], PUB_KEY_SIZE);
+            _fwd_prefs.whitelist_count--; removed++;
+          } else k++;
+        }
+      }
+      _fwd_prefs.save(_fs);
+      sprintf(reply, "OK (%d removed)", removed);
+    } else if (memcmp(config, "fwd.whitelist.clear", 19) == 0) {
+      _fwd_prefs.whitelist_count = 0;
+      _fwd_prefs.save(_fs);
+      strcpy(reply, "OK");
+    } else if (memcmp(config, "fwd.whitelist ", 14) == 0) {
+      config += 14;
+      if (memcmp(config, "on", 2) == 0) { _fwd_prefs.whitelist_mode = 1; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else if (memcmp(config, "off", 3) == 0) { _fwd_prefs.whitelist_mode = 0; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, must be on or off");
+    } else if (memcmp(config, "flood.max.anon.request ", 23) == 0) {
+      int m = atoi(&config[23]);
+      if (m <= 64) { _fwd_prefs.flood_max_anon_request = m; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, max 64");
+    } else if (memcmp(config, "flood.max.request ", 18) == 0) {
+      int m = atoi(&config[18]);
+      if (m <= 64) { _fwd_prefs.flood_max_request = m; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, max 64");
+    } else if (memcmp(config, "flood.max.response ", 19) == 0) {
+      int m = atoi(&config[19]);   // NOTE: PR #2797 had an off-by-one here ([18]); fixed.
+      if (m <= 64) { _fwd_prefs.flood_max_response = m; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
+      else strcpy(reply, "Error, max 64");
+    } else {
+      return false;   // not a fwd 'set' -> let CommonCLI handle it
+    }
+    return true;
+  }
+
+  if (memcmp(command, "get ", 4) == 0) {
+    char* config = command + 4;
+    if (memcmp(config, "fwd.hashfilter.prob", 19) == 0) {   // dedicated getter (set/get symmetry)
+      sprintf(reply, "> %d", (int)_fwd_prefs.hashfilter_prob);
+    } else if (memcmp(config, "fwd.hashfilter", 14) == 0) {
+      const char* m = _fwd_prefs.hashfilter_mode == 1 ? "advert"
+                    : (_fwd_prefs.hashfilter_mode == 2 ? "all" : "off");
+      sprintf(reply, "> %s prob=%d", m, (int)_fwd_prefs.hashfilter_prob);
+    } else if (memcmp(config, "fwd.block", 9) == 0) {
+      char* p = reply;
+      p += sprintf(p, "> %d entr%s", (int)_fwd_prefs.block_count, _fwd_prefs.block_count == 1 ? "y" : "ies");
+      for (int k = 0; k < _fwd_prefs.block_count && (p - reply) < 140; k++) {
+        char hex[16];
+        mesh::Utils::toHex(hex, _fwd_prefs.block_keys[k], 6); hex[12] = 0;  // 6-byte prefix
+        uint8_t a = _fwd_prefs.block_actions[k];
+        p += sprintf(p, " | %s %s%s", hex, (a & FWD_BLOCK_PRUNE_PATH) ? "P" : "",
+                     (a & FWD_BLOCK_DROP_ADVERT) ? "A" : "");
+      }
+    } else if (memcmp(config, "fwd.whitelist", 13) == 0) {
+      char* p = reply;
+      p += sprintf(p, "> %s 0hop=%s %d entr%s", _fwd_prefs.whitelist_mode ? "on" : "off",
+                   _fwd_prefs.whitelist_zerohop ? "allow" : "drop",
+                   (int)_fwd_prefs.whitelist_count, _fwd_prefs.whitelist_count == 1 ? "y" : "ies");
+      for (int k = 0; k < _fwd_prefs.whitelist_count && (p - reply) < 140; k++) {
+        char hex[16];
+        mesh::Utils::toHex(hex, _fwd_prefs.whitelist_keys[k], 6); hex[12] = 0;  // 6-byte prefix
+        p += sprintf(p, " | %s", hex);
+      }
+    } else if (memcmp(config, "flood.max.anon.request", 22) == 0) {
+      sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_anon_request);
+    } else if (memcmp(config, "flood.max.request", 17) == 0) {
+      sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_request);
+    } else if (memcmp(config, "flood.max.response", 18) == 0) {
+      sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_response);
+    } else {
+      return false;   // not a fwd 'get' -> let CommonCLI handle it
+    }
+    return true;
+  }
+
+  return false;
 }
 
 void MyMesh::loop() {

@@ -27,6 +27,7 @@
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/ClientACL.h>
 #include <helpers/CommonCLI.h>
+#include <helpers/FwdPrefs.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -87,6 +88,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   unsigned long next_local_advert, next_flood_advert;
   bool _logging;
   NodePrefs _prefs;
+  FwdPrefs _fwd_prefs;       // fork-private forward-filter prefs, persisted to /fwd_prefs (see FwdPrefs.h)
   ClientACL  acl;
   CommonCLI _cli;
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
@@ -129,6 +131,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+  bool handleFwdCommand(char* command, char* reply);   // intercepts fwd.* / flood.max.*request|response (serial + RF admin)
 
 protected:
   float getAirtimeBudgetFactor() const override {
