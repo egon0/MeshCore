@@ -3,6 +3,13 @@
 Status: **IMPLEMENTED + HARDWARE-VALIDATED** on `repeater-fwdfilter-main` (uncommitted). Target line: `fwdfilter4`.
 Tracking artifact (GH issues disabled on this fork; see also `FEATURE-fwd-hashfilter.md`).
 
+## Released boards (`build.sh` release matrix)
+- HW-tested: `RAK_4631_repeater` (nRF52840 + SX1262) and `Heltec_v3_repeater` (ESP32).
+- ⚠️ **`SenseCap_Solar_repeater` (SenseCAP Solar Node P1, nRF52840 + SX1262) — BUILD-VALIDATED ONLY,
+  NOT HARDWARE-TESTED.** Added 2026-06-21 (Flash 54.1% / RAM 13.0%, emits BLE-DFU `firmware.zip`).
+  The filter code is board-agnostic so it compiles like the RAK4631, but we have no P1 device — treat
+  this binary as untested until validated on real hardware.
+
 ## Validation (2026-06-20, RAK4631 @ COM12, debug build)
 - Builds clean: `RAK_4631_repeater` (nRF52, RAM 14.0% / Flash 63.4%) + `Heltec_v3_repeater` (ESP32, Flash 35.0%).
 - **Structural goal met:** diff vs `meshcore/main` touches only `MyMesh.{cpp,h}` (+249); `CommonCLI.{h,cpp}`

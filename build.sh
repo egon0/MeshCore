@@ -203,11 +203,14 @@ build_repeater_firmwares() {
 #  build_firmware "LilyGo_T3S3_sx1262_Repeater"
 #  build_firmware "RAK_4631_Repeater"
 
-  # fwdfilter fork: ship only the maintained/testable boards (RAK4631 + Heltec V3),
-  # not every repeater target -- avoids releasing untested binaries for boards we don't have
-  # (and keeps the release CI fast, like fwdfilter1-3). The filter code itself is board-agnostic.
+  # fwdfilter fork: ship the HW-tested boards (RAK4631 + Heltec V3) plus build-validated
+  # nRF52840+SX1262 targets of the same class. The filter code itself is board-agnostic, so
+  # these compile cleanly; boards we don't own are build-validated only (noted below).
   build_firmware "RAK_4631_repeater"
   build_firmware "Heltec_v3_repeater"
+  # SenseCap Solar Node P1 (nRF52840 + SX1262, RAK4631-class). Build-validated 2026-06-21:
+  # Flash 54.1%, RAM 13.0%, emits firmware.zip for BLE-DFU. NOT HW-tested (no P1 on hand).
+  build_firmware "SenseCap_Solar_repeater"
 
 }
 
