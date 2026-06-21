@@ -430,15 +430,21 @@ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
   // [fwd-filter Stage 1] Net-health: throttle forwarding of unidentifiable 1-byte path-hash traffic
   // (1-byte hashes collide in a 256-value space, so large networks can't attribute them; pushes
-  // nodes to multibyte). hashfilter_mode selects WHAT is matched: 0=off, 1=adverts only, 2=all.
-  // `prob` is the % chance to drop a MATCHED packet and applies in BOTH modes (1 and 2) -- adverts
-  // are probabilistic too, not auto-dropped. Default prob=100 => every match dropped; lower it to thin.
+  // nodes to multibyte). Two-step: (1) decide if the packet is MATCHED by the mode, then (2) drop a
+  // matched packet with `prob`% chance. hashfilter_mode: 0=off, 1=adverts only, 2=all. `prob` applies
+  // in BOTH modes (adverts are probabilistic too, not auto-dropped); default prob=100 => every match
+  // dropped, lower it to thin. (Explicit match/drop split for readability -- equivalent to the old
+  // `(mode==2 || is_advert) && rand<prob`, which read as if adverts bypassed the mode.)
   if (_fwd_prefs.hashfilter_mode != 0 && packet->getPathHashSize() == 1) {
     bool is_advert = packet->getPayloadType() == PAYLOAD_TYPE_ADVERT;
-    // mode 1 matches adverts only; mode 2 matches all 1-byte traffic. (mode is 1 or 2 here -- the
-    // outer guard excludes 0, and load() clamps >2 to 0 -- so this is == (mode==2 || (mode==1 && advert)).)
-    if ((_fwd_prefs.hashfilter_mode == 2 || is_advert)
-        && (int)(rand() % 100) < _fwd_prefs.hashfilter_prob) {
+    bool matched = false;
+    if (_fwd_prefs.hashfilter_mode == 1) {         // adverts only
+      matched = is_advert;
+    } else if (_fwd_prefs.hashfilter_mode == 2) {  // all 1-byte traffic
+      matched = true;
+    }
+    // (no else: the outer guard excludes mode 0 and FwdPrefs::sanitise() clamps >2 to 0, so mode is 1 or 2.)
+    if (matched && (int)(rand() % 100) < _fwd_prefs.hashfilter_prob) {
       MESH_DEBUG_PRINTLN("fwd-filter: drop 1-byte %s (hashfilter mode=%d prob=%d)",
                          is_advert ? "advert" : "pkt", (int)_fwd_prefs.hashfilter_mode,
                          (int)_fwd_prefs.hashfilter_prob);
