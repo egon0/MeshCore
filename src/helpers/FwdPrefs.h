@@ -47,6 +47,7 @@
 #define FWD_TAG_FM_REQUEST       0x40
 #define FWD_TAG_FM_ANON_REQUEST  0x41
 #define FWD_TAG_FM_RESPONSE      0x42
+#define FWD_TAG_SCOPED_RESERVE   0x50
 
 struct FwdPrefs {
   // -- hash-size filter (Stage 1) --
@@ -68,6 +69,9 @@ struct FwdPrefs {
   uint8_t flood_max_request;      // REQ
   uint8_t flood_max_anon_request; // ANON_REQ
   uint8_t flood_max_response;     // RESPONSE
+
+  // -- airtime reserve (Stage 4): drop unscoped floods under TX-budget pressure so scoped keeps its slice --
+  uint8_t scoped_reserve_pct;     // 0..100 = % of TX airtime budget reserved for scoped-only (0 = off/default)
 
   void reset();                   // set all fields to defaults (off / empty / cap 64)
   void sanitise();                // clamp out-of-range values after a load

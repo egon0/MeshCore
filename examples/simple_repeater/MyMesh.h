@@ -89,6 +89,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   bool _logging;
   NodePrefs _prefs;
   FwdPrefs _fwd_prefs;       // fork-private forward-filter prefs, persisted to /fwd_prefs (see FwdPrefs.h)
+  // fwd-filter Stage 4 runtime counters (airtime reserve) -- exposed via `get fwd.scoped.stats`.
+  // SINCE-BOOT ONLY: RAM-only, reset to 0 on every reboot, NOT persisted (per-packet flash writes would wear
+  // the nRF52 flash; matches the Dispatcher's RAM-only n_recv_flood/etc). For cumulative/long-term stats,
+  // aggregate externally (observer polls `get fwd.scoped.stats` / MQTT) -- the reboot reset is not data loss.
+  uint32_t n_fwd_scoped, n_fwd_unscoped, n_drop_unscoped;
+  uint32_t airtime_saved_unscoped;   // ms of estimated airtime saved by dropping unscoped floods
   ClientACL  acl;
   CommonCLI _cli;
   uint8_t reply_data[MAX_PACKET_PAYLOAD];

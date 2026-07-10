@@ -490,6 +490,28 @@ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
       return false;
     }
   }
+  // [fwd-filter Stage 4] Airtime reserve: under sustained TX-budget pressure, drop UNSCOPED floods so the
+  // reserved slice of the duty-cycle budget stays free for scoped delivery. Scoped floods (non-wildcard
+  // region) and direct traffic bypass. scoped_reserve_pct=0 => no-op (default). Counts the forward/drop mix.
+  // (recv_pkt_region is set by filterRecvFloodPacket() before this; NULL was already dropped above.)
+  if (packet->isRouteFlood() && recv_pkt_region != NULL) {
+    if (recv_pkt_region->isWildcard()) {                 // unscoped flood (wildcard region, flood-allowed)
+      if (_fwd_prefs.scoped_reserve_pct > 0) {
+        unsigned long max_budget = (unsigned long)(getDutyCycleWindowMs() / (1.0f + getAirtimeBudgetFactor()));
+        unsigned long reserve_ms = (unsigned long)((uint64_t)max_budget * _fwd_prefs.scoped_reserve_pct / 100);
+        uint32_t est = _radio->getEstAirtimeFor(packet->getRawLength());
+        if (getRemainingTxBudget() < reserve_ms + est) {
+          n_drop_unscoped++; airtime_saved_unscoped += est;
+          MESH_DEBUG_PRINTLN("fwd-filter: drop unscoped flood (airtime reserve %d%%, budget=%lu reserve=%lu)",
+                             (int)_fwd_prefs.scoped_reserve_pct, getRemainingTxBudget(), reserve_ms);
+          return false;
+        }
+      }
+      n_fwd_unscoped++;
+    } else {
+      n_fwd_scoped++;                                     // scoped flood -- always allowed by this gate
+    }
+  }
   return true;
 }
 
@@ -950,6 +972,8 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   set_radio_at = revert_radio_at = 0;
   _logging = false;
   region_load_active = false;
+  n_fwd_scoped = n_fwd_unscoped = n_drop_unscoped = 0;
+  airtime_saved_unscoped = 0;
 
 #if MAX_NEIGHBOURS
   memset(neighbours, 0, sizeof(neighbours));
@@ -1469,6 +1493,9 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       int m = atoi(&config[19]);   // NOTE: PR #2797 had an off-by-one here ([18]); fixed.
       if (m <= 64) { _fwd_prefs.flood_max_response = m; _fwd_prefs.save(_fs); strcpy(reply, "OK"); }
       else strcpy(reply, "Error, max 64");
+    } else if (memcmp(config, "fwd.scoped.reserve ", 19) == 0) {
+      _fwd_prefs.scoped_reserve_pct = constrain(atoi(&config[19]), 0, 100);
+      _fwd_prefs.save(_fs); strcpy(reply, "OK");
     } else {
       return false;   // not a fwd 'set' -> let CommonCLI handle it
     }
@@ -1509,6 +1536,12 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_request);
     } else if (memcmp(config, "flood.max.response", 18) == 0) {
       sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_response);
+    } else if (memcmp(config, "fwd.scoped.reserve", 18) == 0) {   // dedicated getter (set/get symmetry)
+      sprintf(reply, "> %d", (int)_fwd_prefs.scoped_reserve_pct);
+    } else if (memcmp(config, "fwd.scoped.stats", 16) == 0) {
+      sprintf(reply, "> reserve=%d%% fwd_scoped=%lu fwd_unscoped=%lu drop_unscoped=%lu saved_air=%lums",
+              (int)_fwd_prefs.scoped_reserve_pct, (unsigned long)n_fwd_scoped, (unsigned long)n_fwd_unscoped,
+              (unsigned long)n_drop_unscoped, (unsigned long)airtime_saved_unscoped);
     } else {
       return false;   // not a fwd 'get' -> let CommonCLI handle it
     }

@@ -52,6 +52,7 @@ void FwdPrefs::reset() {
   flood_max_request = 64;
   flood_max_anon_request = 64;
   flood_max_response = 64;
+  scoped_reserve_pct = 0;   // off by default -> backward-compatible no-op
 }
 
 void FwdPrefs::sanitise() {
@@ -64,6 +65,7 @@ void FwdPrefs::sanitise() {
   if (flood_max_request > 64) flood_max_request = 64;
   if (flood_max_anon_request > 64) flood_max_anon_request = 64;
   if (flood_max_response > 64) flood_max_response = 64;
+  if (scoped_reserve_pct > 100) scoped_reserve_pct = 100;
 }
 
 void FwdPrefs::load(FILESYSTEM* fs) {
@@ -103,6 +105,7 @@ void FwdPrefs::load(FILESYSTEM* fs) {
       case FWD_TAG_FM_REQUEST:      fwd_read_u8(file, len, &flood_max_request); break;
       case FWD_TAG_FM_ANON_REQUEST: fwd_read_u8(file, len, &flood_max_anon_request); break;
       case FWD_TAG_FM_RESPONSE:     fwd_read_u8(file, len, &flood_max_response); break;
+      case FWD_TAG_SCOPED_RESERVE:  fwd_read_u8(file, len, &scoped_reserve_pct); break;
       default:                      fwd_skip(file, len); break;   // unknown tag -> forward-compat skip
     }
   }
@@ -141,6 +144,8 @@ void FwdPrefs::save(FILESYSTEM* fs) const {
   fwd_write_u8(file, FWD_TAG_FM_REQUEST, flood_max_request);
   fwd_write_u8(file, FWD_TAG_FM_ANON_REQUEST, flood_max_anon_request);
   fwd_write_u8(file, FWD_TAG_FM_RESPONSE, flood_max_response);
+
+  fwd_write_u8(file, FWD_TAG_SCOPED_RESERVE, scoped_reserve_pct);
 
   file.close();
 }
