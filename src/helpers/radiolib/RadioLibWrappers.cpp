@@ -147,7 +147,13 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
 }
 
 uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
-  return _radio->getTimeOnAir(len_bytes) / 1000;
+  RadioLibTime_t t = _radio->getTimeOnAir(len_bytes);
+  // getTimeOnAir() returns a NEGATIVE RadioLib error code (e.g. RADIOLIB_ERR_WRONG_MODEM) if a
+  // transient/busy SPI read of the packet type glitches (getPacketType() defaults to 0xFF). Un-guarded
+  // that error code reads as ~4.29e9 us -> a saturated airtime estimate that poisons budget/airtime math
+  // (spurious fwd-reserve drop + wrecked fwd.scoped.stats). See ACETyr/MeshCore#2.
+  if ((int32_t)t < 0) return 0;
+  return t / 1000;
 }
 
 bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
