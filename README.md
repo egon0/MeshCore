@@ -2,7 +2,15 @@
 > ### ⚙️ ACETyr fork — repeater firmware (RoomServer Observer)
 > This fork **tracks [meshcore-dev/MeshCore](https://github.com/meshcore-dev/MeshCore) mainline** (rebased on `main`) and adds fork-private repeater **forward-filter** features: hash-size filter, per-pubkey blacklist, last-hop whitelist, per-payload flood caps, and an **airtime reserve for scoped traffic** (`fwd.scoped.reserve`). Filter config lives in its own `/fwd_prefs` TLV so mainline `/com_prefs` stays byte-for-byte pristine.
 >
-> ℹ️ GitHub shows *"forked from agessaman/MeshCore"* — that is fork-network metadata from when this repo was created and does **not** reflect the code base, which is based on **current meshcore-dev mainline**. Firmware: see [Releases](https://github.com/ACETyr/MeshCore/releases) (`repeater-1.16.0.fwdfilterN`).
+> ℹ️ GitHub shows *"forked from agessaman/MeshCore"* — that is fork-network metadata from when this repo was created and does **not** reflect the code base, which is based on **current meshcore-dev mainline**. Firmware: see [Releases](https://github.com/ACETyr/MeshCore/releases) (`repeater-v1.16.0.fwdfilterN`).
+>
+> ### 📖 Documentation for repeater operators
+> | | 🇩🇪 Deutsch | 🇬🇧 English |
+> |---|---|---|
+> | **All forward-filter features, commands and safe deployment** | [Forward-Filter-Handbuch](./docs/forward-filter.de.md) | [Forward-filter manual](./docs/forward-filter.md) |
+> | **How to get the firmware onto a device (USB + OTA)** | [Flash-Anleitung](./docs/flashing-repeater.de.md) | [Flashing guide](./docs/flashing-repeater.md) |
+>
+> These two documents are the **complete, current** feature reference. The release notes only record what changed per version — do not read them as documentation.
 
 ---
 
