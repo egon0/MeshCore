@@ -1,6 +1,8 @@
 <!-- ACETyr fork banner — keep at top across rebases -->
-> ### ⚙️ ACETyr fork — repeater firmware (RoomServer Observer)
-> This fork **tracks [meshcore-dev/MeshCore](https://github.com/meshcore-dev/MeshCore) mainline** (rebased on `main`) and adds fork-private repeater **forward-filter** features: hash-size filter, per-pubkey blacklist, last-hop whitelist, per-payload flood caps, and an **airtime reserve for scoped traffic** (`fwd.scoped.reserve`). Filter config lives in its own `/fwd_prefs` TLV so mainline `/com_prefs` stays byte-for-byte pristine.
+> ### ⚙️ ACETyr fork — repeater firmware with forward filter
+> You are on branch **`repeater-fwdfilter-main`**, the fork's repeater line. It **tracks [meshcore-dev/MeshCore](https://github.com/meshcore-dev/MeshCore) mainline** (rebased on `main`) and adds fork-private **forward-filter** features to the plain `simple_repeater` build: hash-size filter, per-pubkey blacklist, last-hop whitelist, per-payload flood caps, and an **airtime reserve for scoped traffic** (`fwd.scoped.reserve`). Filter config lives in its own `/fwd_prefs` TLV so mainline `/com_prefs` stays byte-for-byte pristine.
+>
+> This is an ordinary repeater — it contains **no MQTT, room-server or observer code**. That is a separate line of work in this repo, on branch [`room-server-observer-116`](https://github.com/ACETyr/MeshCore/tree/room-server-observer-116), built and distributed separately.
 >
 > ℹ️ GitHub shows *"forked from agessaman/MeshCore"* — that is fork-network metadata from when this repo was created and does **not** reflect the code base, which is based on **current meshcore-dev mainline**. Firmware: see [Releases](https://github.com/ACETyr/MeshCore/releases) (`repeater-v1.16.0.fwdfilterN`).
 >
