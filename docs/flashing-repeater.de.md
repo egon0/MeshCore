@@ -3,29 +3,44 @@
 *🇬🇧 [English version](./flashing-repeater.md) · ⚙️ [Forward-Filter-Handbuch](./forward-filter.de.md)*
 
 Diese Anleitung beschreibt, wie du die ACETyr-Repeater-Firmware
-(`repeater-v1.16.0.fwdfilterN`) auf ein Gerät bekommst — per USB und über Funk (OTA).
+(`repeater-v1.16.0.fwdfilterN`) auf ein Gerät bekommst — mit dem Webflasher, per esptool und über
+Funk (OTA).
 
-> Diese Firmware wird **nicht** über <https://flasher.meshcore.io> verteilt. Der offizielle Web-Flasher
-> kennt nur die Mainline-Builds. Die Dateien hier kommen aus den
-> [Releases dieses Forks](https://github.com/ACETyr/MeshCore/releases).
+Der **[MeshCore-Webflasher](https://flasher.meshcore.io)** ist der empfohlene Weg, so wie bei der
+offiziellen Firmware auch. In der Geräteliste steht er nicht — diese Firmware wird nicht über den
+Flasher *verteilt* — aber er kann sie flashen: über den Eintrag **„Custom Firmware"** ganz unten in der
+Geräteliste lädst du die Datei aus den
+[Releases dieses Forks](https://github.com/ACETyr/MeshCore/releases) direkt von deinem Rechner.
 
 ---
 
 ## Schritt 1 — Die richtige Datei herunterladen
 
 Immer die **neueste** Release-Version nehmen ([Releases](https://github.com/ACETyr/MeshCore/releases)),
-ältere enthalten behobene Fehler. Welche Datei du brauchst, hängt von Board **und** Flash-Weg ab:
+ältere enthalten behobene Fehler. Welche der vier bis sechs Dateien du brauchst, hängt vom Board ab —
+und davon, ob du **updaten** oder **neu aufsetzen** willst:
 
-| Board | USB-Flash | OTA (über Funk) |
-|---|---|---|
-| **RAK4631** (nRF52840) | `RAK_4631_repeater-…​.uf2` | `RAK_4631_repeater-…​.zip` |
-| **Heltec V3** (ESP32-S3) | `Heltec_v3_repeater-…​-merged.bin` | `Heltec_v3_repeater-…​.bin` (**ohne** `merged`) |
-| **SenseCAP Solar Node P1** (nRF52840) | `SenseCap_Solar_repeater-…​.uf2` | `SenseCap_Solar_repeater-…​.zip` |
+| Board | Update (Konfiguration bleibt) | Erstflash / komplett neu | OTA über Funk |
+|---|---|---|---|
+| **RAK4631** (nRF52840) | `…​.zip` | `…​.zip` | `…​.zip` |
+| **Heltec V3** (ESP32-S3) | `…​.bin` (**ohne** `merged`) | `…​-merged.bin` | `…​.bin` (**ohne** `merged`) |
+| **SenseCAP Solar Node P1** (nRF52840) | `…​.zip` | `…​.zip` | `…​.zip` |
 
-> ⚠️ **Heltec V3: `merged` vs. nicht-`merged`.** Die `-merged.bin` enthält Bootloader, Partitionstabelle
-> und Anwendung und wird per USB an Adresse `0x0` geschrieben. Die einfache `.bin` enthält nur die
-> Anwendung und ist ausschließlich für OTA gedacht. Wer die beiden verwechselt, bekommt einen Knoten,
-> der nicht mehr startet.
+Bei den nRF52-Boards ist es immer dieselbe `.zip` — ein DFU-Paket, das nur die Anwendung ersetzt und
+Konfiguration wie Identität in Ruhe lässt. Die zusätzlich beiliegende `.uf2` ist eine Alternative für
+den Drag-and-Drop-Weg ohne Flasher (siehe [Weg C](#weg-c--rak4631--sensecap-p1-per-uf2-drag-and-drop)),
+der Webflasher nimmt sie **nicht** an.
+
+Bei Heltec V3 hängt alles an dieser einen Unterscheidung:
+
+> ⚠️ **`-merged.bin` löscht den gesamten Flash — inklusive Geräteidentität.**
+> Sie enthält Bootloader, Partitionstabelle und Anwendung, wird an Adresse `0x0` geschrieben, und der
+> Webflasher führt dabei einen vollständigen Chip-Erase durch (er warnt dich auch selbst davor). Danach
+> hat der Knoten einen **neuen Pubkey** und muss überall neu eingetragen werden.
+>
+> **Zum Aktualisieren eines laufenden Knotens die einfache `.bin` ohne `merged` im Namen nehmen.** Sie
+> ersetzt nur die Anwendung; Name, Passwort, Funk- und Regionseinstellungen sowie die Identität bleiben
+> erhalten. Dieselbe Datei wird auch für OTA verwendet.
 
 > ℹ️ **SenseCAP Solar Node P1** ist bisher nur **build-validiert, nicht auf echter Hardware getestet**
 > — es stand kein Gerät zur Verfügung. Der Filter-Code ist boardunabhängig und übersetzt sauber, aber
@@ -35,9 +50,42 @@ Immer die **neueste** Release-Version nehmen ([Releases](https://github.com/ACET
 
 ## Schritt 2 — Flashen
 
-### Weg A — RAK4631 / SenseCAP P1 per USB (`.uf2`)
+### Weg A — Webflasher (empfohlen)
 
-Der einfachste und sicherste Weg. Ein UF2-Flash kann den Knoten nicht unbrauchbar machen.
+Browser: **Chrome oder Edge**. Firefox und Safari können kein WebSerial und funktionieren nicht.
+
+1. <https://flasher.meshcore.io> öffnen.
+   *(Der Flasher der österreichischen Community unter <https://flasher.meshcore-austria.at> ist ein Fork
+   davon und verhält sich identisch — beide funktionieren.)*
+2. In der Geräteliste **nicht** dein Board auswählen, sondern ganz unten **„Custom Firmware"**
+   anklicken und die heruntergeladene Datei aus Schritt 1 auswählen. Der Flasher erkennt am Dateityp
+   selbst, worum es sich handelt: `.zip` → nRF52, `.bin` → ESP32.
+3. Gerät per USB anstecken.
+4. **Nur bei RAK4631 / SenseCAP P1:** das Gerät in den DFU-Modus bringen — entweder mit der Schaltfläche
+   **„Enter DFU mode"** im Flasher, oder von Hand durch **zweimaliges kurzes Drücken der Reset-Taste**.
+5. Flashen starten, seriellen Port auswählen, warten.
+
+Wählst du eine `-merged.bin`, zeigt der Flasher eine Warnung, dass der Flash gelöscht wird — das ist
+korrekt und gewollt, siehe oben. Beim Update willst du diese Warnung *nicht* sehen.
+
+### Weg B — Heltec V3 mit esptool (Kommandozeile)
+
+Für Skripte und Massenflash. `pip install esptool`, dann:
+
+```bash
+# Update eines laufenden Knotens — Konfiguration bleibt erhalten
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106.bin
+
+# Erstflash / komplett neu aufsetzen — löscht die Identität
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
+```
+
+Unter Linux/macOS statt `COM5` den passenden Port angeben (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`).
+Bei Verbindungsproblemen die Baudrate auf `115200` senken.
+
+### Weg C — RAK4631 / SenseCAP P1 per UF2 (Drag and Drop)
+
+Ohne jedes Werkzeug, nur Dateimanager. Kann den Knoten nicht unbrauchbar machen.
 
 1. Gerät per USB anstecken.
 2. **Reset-Taste zweimal kurz hintereinander drücken.** Es erscheint ein USB-Laufwerk
@@ -45,30 +93,17 @@ Der einfachste und sicherste Weg. Ein UF2-Flash kann den Knoten nicht unbrauchba
 3. Die `.uf2`-Datei auf dieses Laufwerk kopieren.
 4. Das Laufwerk verschwindet von selbst, das Gerät startet neu. Fertig.
 
+Die `.uf2` ersetzt nur die Anwendung, Konfiguration und Identität bleiben erhalten.
+
 Klappt der Doppel-Reset nicht: langsamer probieren (zwei getrennte Klicks, nicht ein Doppelklick),
 anderes USB-Kabel testen — viele Kabel können nur laden, nicht Daten übertragen.
 
-### Weg B — Heltec V3 per USB (`-merged.bin` an `0x0`)
-
-**Mit esptool** (Python, `pip install esptool`):
-
-```bash
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
-```
-
-Unter Linux/macOS statt `COM5` den passenden Port angeben (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`).
-Bei Verbindungsproblemen die Baudrate auf `115200` senken.
-
-**Ohne Installation, im Browser:** <https://adafruit.github.io/Adafruit_WebSerial_ESPTool/> in Chrome
-oder Edge öffnen, verbinden, die `-merged.bin` an Offset `0x0` auswählen und schreiben. Firefox und
-Safari können kein WebSerial.
-
-### Weg C — Über Funk, nRF52-Boards (RAK4631, SenseCAP P1)
+### Weg D — Über Funk, nRF52-Boards (RAK4631, SenseCAP P1)
 
 Für Knoten, an die du nicht mehr physisch herankommst. Du brauchst BLE-Reichweite zum Gerät und
 Admin-Zugang über Funk.
 
-1. Die **`.zip`** des Releases auf das Telefon laden (nicht die `.uf2`).
+1. Die **`.zip`** des Releases auf das Telefon laden — dieselbe Datei wie beim Webflasher.
 2. App **nRF Device Firmware Update** installieren (iOS App Store / Google Play, Suchbegriff `nrf dfu`).
 3. In der MeshCore-App per Remote-Administration am Repeater als Admin anmelden, im Command-Line-Tab
    `start ota` eingeben. Antwort `OK` bedeutet: Gerät ist im OTA-Modus.
@@ -87,7 +122,7 @@ noch einmal absetzen — der OTA-Modus läuft nach einiger Zeit ab.
 > den Knoten tot am Mast zu lassen. Ein abgebrochener OTA-Flash ist damit kein Kletter-Einsatz mehr.
 > Hintergrund: <https://blog.meshcore.io/2026/04/06/otafix-bootloader>
 
-### Weg D — Über Funk, Heltec V3
+### Weg E — Über Funk, Heltec V3
 
 1. Die **nicht**-`merged` `.bin` des Releases bereithalten.
 2. Per Remote-Administration als Admin anmelden und `start ota` absetzen.
@@ -127,7 +162,8 @@ Forward-Filter.
 Drei Wege, alle gleichwertig — die Forward-Filter-Befehle funktionieren auf jedem davon:
 
 **Per USB, im Browser.** <https://config.meshcore.io> in Chrome oder Edge öffnen, Gerät per USB
-verbinden, seriellen Port auswählen. Bequemster Weg für die Erstkonfiguration.
+verbinden, seriellen Port auswählen. Bequemster Weg für die Erstkonfiguration. (Der Webflasher hat
+unter „Serial console" dieselbe Funktion eingebaut.)
 
 **Über Funk, aus der MeshCore-App.** Repeater als Admin hinzufügen (Remote Management), dann den
 Command-Line-Tab benutzen. Das ist der Weg für Knoten im Feld — und der Grund, warum die Whitelist
@@ -143,14 +179,16 @@ Nach dem Flashen weiter im [Forward-Filter-Handbuch](./forward-filter.de.md).
 
 ## Was beim Flashen erhalten bleibt
 
-Ein normaler Firmware-Flash — egal auf welchem Weg — lässt das Dateisystem und damit die
-Konfiguration unangetastet: Node-Name, Admin-Passwort, Funk- und Regionseinstellungen sowie die
-Geräteidentität (der Pubkey) bleiben erhalten. Der Knoten ist nach dem Neustart derselbe Knoten.
+Ein **Update** — `.zip`, `.uf2` oder die nicht-`merged` `.bin`, egal auf welchem Weg — lässt das
+Dateisystem und damit die Konfiguration unangetastet: Node-Name, Admin-Passwort, Funk- und
+Regionseinstellungen sowie die Geräteidentität (der Pubkey) bleiben erhalten. Der Knoten ist nach dem
+Neustart derselbe Knoten.
 
 Zwei Ausnahmen:
 
-- **Ein Flash-Erase löscht alles**, auch die Identität. Danach hat der Knoten einen neuen Pubkey und
-  muss überall neu eingetragen werden. Nur machen, wenn du genau das willst.
+- **Ein `-merged.bin`-Flash oder ein Flash-Erase löscht alles**, auch die Identität. Danach hat der
+  Knoten einen neuen Pubkey und muss überall neu eingetragen werden — in Whitelists anderer Betreiber
+  ebenso wie in deiner eigenen Dokumentation. Nur machen, wenn du genau das willst.
 - **Beim Update von `fwdfilter3` auf `fwdfilter4` oder neuer** wird die Filterkonfiguration einmalig
   zurückgesetzt (Umstellung auf die eigene `/fwd_prefs`-Datei). Whitelist- und Blacklist-Einträge
   danach neu setzen — am besten vorher `get fwd.whitelist` und `get fwd.block` abfragen und die
@@ -158,8 +196,11 @@ Zwei Ausnahmen:
 
 ## Zurück auf Mainline
 
-Einfach die offizielle Repeater-Firmware von <https://flasher.meshcore.io> flashen, auf demselben Weg
-wie oben. Die Filterkonfiguration in `/fwd_prefs` bleibt als verwaiste Datei liegen und wird von der
+Die offizielle Repeater-Firmware im Webflasher auswählen — diesmal ganz normal über die Geräteliste —
+und flashen. Auch hier gilt die Unterscheidung: die Update-Variante behält die Identität, die
+Wipe-Variante nicht.
+
+Die Filterkonfiguration in `/fwd_prefs` bleibt als verwaiste Datei liegen und wird von der
 Mainline-Firmware ignoriert; die Filter sind damit wirkungslos. Flasht du später wieder eine
 fwdfilter-Version, ist die alte Konfiguration wieder da.
 
@@ -169,10 +210,13 @@ fwdfilter-Version, ist die alte Konfiguration wieder da.
 
 | Problem | Ursache / Abhilfe |
 |---|---|
+| Browser sieht das Gerät nicht | WebSerial gibt es nur in Chrome und Edge, nicht in Firefox oder Safari |
+| Webflasher nimmt die Datei nicht an | Der Dateiauswahldialog akzeptiert nur `.zip` und `.bin`. Für nRF52 die `.zip` nehmen, nicht die `.uf2` |
+| RAK4631: Flasher meldet einen DFU-Fehler | Gerät war nicht im DFU-Modus. „Enter DFU mode" im Flasher benutzen oder zweimal Reset drücken |
 | Kein USB-Laufwerk nach Doppel-Reset | Zwei getrennte Klicks statt Doppelklick; anderes USB-Kabel (viele sind reine Ladekabel) |
 | esptool findet den Port nicht | USB-Treiber (CP210x/CH340) fehlt; unter Linux fehlt die Berechtigung — Benutzer in Gruppe `dialout` |
-| Browser sieht das Gerät nicht | WebSerial gibt es nur in Chrome und Edge, nicht in Firefox oder Safari |
-| Heltec startet nach dem Flash nicht mehr | Vermutlich die nicht-`merged` `.bin` per USB geflasht. Die `-merged.bin` an `0x0` nachflashen |
+| Heltec startet nach dem Flash nicht mehr | Vermutlich die nicht-`merged` `.bin` an Adresse `0x0` geschrieben. Die `-merged.bin` an `0x0` nachflashen |
+| Knoten hat nach dem Flash einen neuen Pubkey | Es war ein `-merged.bin`-Flash. Zum Aktualisieren die nicht-`merged` `.bin` verwenden |
 | OTA bricht mittendrin ab | `Packet receipt notifications` aktivieren, `Number of Packets` auf 10; Bluetooth am Telefon aus- und einschalten; Gerät in den Bluetooth-Einstellungen entfernen und neu koppeln |
 | Gerät erscheint nicht in der DFU-App | `start ota` erneut absetzen (der Modus läuft ab), `Force Scanning` aktivieren |
 | Knoten nach OTA-Abbruch tot | Ohne OTAFIX-Bootloader hilft nur USB vor Ort. Genau deshalb OTAFIX **vorher** installieren |

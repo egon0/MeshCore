@@ -3,29 +3,43 @@
 *🇩🇪 [Deutsche Fassung](./flashing-repeater.de.md) (primary) · ⚙️ [Forward-filter manual](./forward-filter.md)*
 
 This guide covers how to get the ACETyr repeater firmware (`repeater-v1.16.0.fwdfilterN`) onto a
-device — over USB and over the air.
+device — with the web flasher, with esptool, and over the air.
 
-> This firmware is **not** distributed via <https://flasher.meshcore.io>. The official web flasher only
-> knows the mainline builds. The files here come from this fork's
-> [releases](https://github.com/ACETyr/MeshCore/releases).
+The **[MeshCore web flasher](https://flasher.meshcore.io)** is the recommended route, same as for the
+official firmware. It does not list this firmware — this fork is not *distributed* through the flasher
+— but it can flash it: the **"Custom Firmware"** entry at the bottom of the device list loads a file
+from your own computer, straight out of this fork's
+[releases](https://github.com/ACETyr/MeshCore/releases).
 
 ---
 
 ## Step 1 — download the right file
 
 Always take the **newest** release ([releases](https://github.com/ACETyr/MeshCore/releases)); older
-ones contain bugs that have since been fixed. Which file you need depends on the board **and** the
-flashing route:
+ones contain bugs that have since been fixed. Which of the files you need depends on the board — and
+on whether you want to **update** or **start fresh**:
 
-| Board | USB flash | OTA (over the air) |
-|---|---|---|
-| **RAK4631** (nRF52840) | `RAK_4631_repeater-…​.uf2` | `RAK_4631_repeater-…​.zip` |
-| **Heltec V3** (ESP32-S3) | `Heltec_v3_repeater-…​-merged.bin` | `Heltec_v3_repeater-…​.bin` (**no** `merged`) |
-| **SenseCAP Solar Node P1** (nRF52840) | `SenseCap_Solar_repeater-…​.uf2` | `SenseCap_Solar_repeater-…​.zip` |
+| Board | Update (config preserved) | Fresh install / wipe | OTA |
+|---|---|---|---|
+| **RAK4631** (nRF52840) | `…​.zip` | `…​.zip` | `…​.zip` |
+| **Heltec V3** (ESP32-S3) | `…​.bin` (**no** `merged`) | `…​-merged.bin` | `…​.bin` (**no** `merged`) |
+| **SenseCAP Solar Node P1** (nRF52840) | `…​.zip` | `…​.zip` | `…​.zip` |
 
-> ⚠️ **Heltec V3: `merged` vs. non-`merged`.** The `-merged.bin` contains bootloader, partition table
-> and application and is written to address `0x0` over USB. The plain `.bin` contains only the
-> application and is for OTA exclusively. Mixing the two up gives you a node that will not boot.
+On the nRF52 boards it is always the same `.zip` — a DFU package that replaces only the application and
+leaves configuration and identity alone. The `.uf2` that also ships is an alternative for the
+drag-and-drop route without a flasher (see [route C](#route-c--rak4631--sensecap-p1-via-uf2-drag-and-drop));
+the web flasher does **not** accept it.
+
+On the Heltec V3 everything hinges on one distinction:
+
+> ⚠️ **`-merged.bin` erases the entire flash — including the device identity.**
+> It contains bootloader, partition table and application, is written to address `0x0`, and the web
+> flasher performs a full chip erase along with it (it warns you about this itself). Afterwards the
+> node has a **new pubkey** and has to be re-registered everywhere.
+>
+> **To update a running node, take the plain `.bin` without `merged` in the name.** It replaces only
+> the application; name, password, radio and region settings and the identity are preserved. The same
+> file is used for OTA.
 
 > ℹ️ **SenseCAP Solar Node P1** is **build-validated only, not hardware-tested** — no device was
 > available. The filter code is board-agnostic and compiles cleanly, but treat these binaries as
@@ -35,9 +49,42 @@ flashing route:
 
 ## Step 2 — flash it
 
-### Route A — RAK4631 / SenseCAP P1 over USB (`.uf2`)
+### Route A — web flasher (recommended)
 
-The simplest and safest route. A UF2 flash cannot brick the node.
+Browser: **Chrome or Edge**. Firefox and Safari cannot do WebSerial and will not work.
+
+1. Open <https://flasher.meshcore.io>.
+   *(The Austrian community flasher at <https://flasher.meshcore-austria.at> is a fork of it and
+   behaves identically — either works.)*
+2. Do **not** pick your board from the device list. Instead click **"Custom Firmware"** at the very
+   bottom and select the file you downloaded in step 1. The flasher works out the target from the file
+   type: `.zip` → nRF52, `.bin` → ESP32.
+3. Connect the device over USB.
+4. **RAK4631 / SenseCAP P1 only:** put the device into DFU mode — either with the **"Enter DFU mode"**
+   button in the flasher, or manually by **pressing the reset button twice in quick succession**.
+5. Start flashing, pick the serial port, wait.
+
+If you select a `-merged.bin`, the flasher shows a warning that the flash will be erased — that is
+correct and intended, see above. When updating, you do *not* want to see that warning.
+
+### Route B — Heltec V3 with esptool (command line)
+
+For scripting and bulk flashing. `pip install esptool`, then:
+
+```bash
+# update a running node — configuration preserved
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106.bin
+
+# fresh install — erases the identity
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
+```
+
+On Linux/macOS use the appropriate port instead of `COM5` (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`). If
+the connection is unstable, drop the baud rate to `115200`.
+
+### Route C — RAK4631 / SenseCAP P1 via UF2 (drag and drop)
+
+No tooling at all, just a file manager. Cannot brick the node.
 
 1. Connect the device over USB.
 2. **Press the reset button twice in quick succession.** A USB drive appears (named `RAK4631` on the
@@ -45,30 +92,17 @@ The simplest and safest route. A UF2 flash cannot brick the node.
 3. Copy the `.uf2` file onto that drive.
 4. The drive disappears on its own and the device reboots. Done.
 
+The `.uf2` replaces only the application; configuration and identity are preserved.
+
 If the double reset does not work: try slower (two separate clicks, not a double-click), and try
 another USB cable — many cables can only charge, not carry data.
 
-### Route B — Heltec V3 over USB (`-merged.bin` at `0x0`)
-
-**With esptool** (Python, `pip install esptool`):
-
-```bash
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
-```
-
-On Linux/macOS use the appropriate port instead of `COM5` (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`). If
-the connection is unstable, drop the baud rate to `115200`.
-
-**Without installing anything, in the browser:** open
-<https://adafruit.github.io/Adafruit_WebSerial_ESPTool/> in Chrome or Edge, connect, select the
-`-merged.bin` at offset `0x0` and write. Firefox and Safari do not support WebSerial.
-
-### Route C — over the air, nRF52 boards (RAK4631, SenseCAP P1)
+### Route D — over the air, nRF52 boards (RAK4631, SenseCAP P1)
 
 For nodes you can no longer reach physically. You need BLE range to the device and admin access over
 the air.
 
-1. Get the release **`.zip`** onto your phone (not the `.uf2`).
+1. Get the release **`.zip`** onto your phone — the same file the web flasher uses.
 2. Install the **nRF Device Firmware Update** app (iOS App Store / Google Play, search `nrf dfu`).
 3. In the MeshCore app, log in to the repeater as admin via remote management and enter `start ota` in
    the command line tab. A reply of `OK` means the device is in OTA mode.
@@ -86,7 +120,7 @@ If the device does not appear in the list: enable `Force Scanning` in the DFU ap
 > dead on the mast. An aborted OTA flash then stops being a climbing job. Background:
 > <https://blog.meshcore.io/2026/04/06/otafix-bootloader>
 
-### Route D — over the air, Heltec V3
+### Route E — over the air, Heltec V3
 
 1. Have the **non**-`merged` `.bin` of the release ready.
 2. Log in as admin via remote management and issue `start ota`.
@@ -126,7 +160,8 @@ forward filter.
 Three routes, all equivalent — the forward-filter commands work on any of them:
 
 **Over USB, in the browser.** Open <https://config.meshcore.io> in Chrome or Edge, connect the device
-over USB, select the serial port. The most convenient route for initial setup.
+over USB, select the serial port. The most convenient route for initial setup. (The web flasher has the
+same thing built in under "Serial console".)
 
 **Over the air, from the MeshCore app.** Add the repeater as an admin (remote management), then use
 the command line tab. This is the route for field nodes — and the reason the whitelist always lets
@@ -141,14 +176,15 @@ After flashing, continue with the [forward-filter manual](./forward-filter.md).
 
 ## What survives a flash
 
-A normal firmware flash — by any route — leaves the filesystem and therefore the configuration alone:
-node name, admin password, radio and region settings, and the device identity (the pubkey) are
-preserved. After the reboot it is the same node.
+An **update** — `.zip`, `.uf2` or the non-`merged` `.bin`, by any route — leaves the filesystem and
+therefore the configuration alone: node name, admin password, radio and region settings, and the device
+identity (the pubkey) are preserved. After the reboot it is the same node.
 
 Two exceptions:
 
-- **A flash erase wipes everything**, including the identity. The node then has a new pubkey and has to
-  be re-registered everywhere. Only do this if that is exactly what you want.
+- **A `-merged.bin` flash or a flash erase wipes everything**, including the identity. The node then
+  has a new pubkey and has to be re-registered everywhere — in other operators' whitelists as much as
+  in your own documentation. Only do this if that is exactly what you want.
 - **Upgrading from `fwdfilter3` to `fwdfilter4` or newer** resets the filter configuration once (the
   move to the dedicated `/fwd_prefs` file). Re-add whitelist and blacklist entries afterwards — best
   to run `get fwd.whitelist` and `get fwd.block` beforehand and keep the output. Everything else is
@@ -156,10 +192,13 @@ Two exceptions:
 
 ## Going back to mainline
 
-Just flash the official repeater firmware from <https://flasher.meshcore.io> via the same routes as
-above. The filter configuration in `/fwd_prefs` stays behind as an orphaned file and is ignored by
-mainline firmware, so the filters are inert. Flash a fwdfilter build again later and the old
-configuration is back.
+Select the official repeater firmware in the web flasher — this time through the device list as usual
+— and flash it. The same distinction applies: the update variant keeps the identity, the wipe variant
+does not.
+
+The filter configuration in `/fwd_prefs` stays behind as an orphaned file and is ignored by mainline
+firmware, so the filters are inert. Flash a fwdfilter build again later and the old configuration is
+back.
 
 ---
 
@@ -167,10 +206,13 @@ configuration is back.
 
 | Symptom | Cause / fix |
 |---|---|
+| Browser does not see the device | WebSerial exists only in Chrome and Edge, not Firefox or Safari |
+| Web flasher rejects the file | The file picker only accepts `.zip` and `.bin`. For nRF52 use the `.zip`, not the `.uf2` |
+| RAK4631: flasher reports a DFU error | The device was not in DFU mode. Use "Enter DFU mode" in the flasher, or press reset twice |
 | No USB drive after double reset | Two separate clicks, not a double-click; try another USB cable (many are charge-only) |
 | esptool cannot find the port | Missing USB driver (CP210x/CH340); on Linux a permissions issue — add your user to `dialout` |
-| Browser does not see the device | WebSerial exists only in Chrome and Edge, not Firefox or Safari |
-| Heltec will not boot after flashing | Probably the non-`merged` `.bin` flashed over USB. Re-flash the `-merged.bin` at `0x0` |
+| Heltec will not boot after flashing | Probably the non-`merged` `.bin` written to address `0x0`. Re-flash the `-merged.bin` at `0x0` |
+| Node has a new pubkey after flashing | It was a `-merged.bin` flash. Use the non-`merged` `.bin` to update |
 | OTA aborts partway through | Enable `Packet receipt notifications`, set `Number of Packets` to 10; toggle Bluetooth on the phone; forget the device in Bluetooth settings and re-pair |
 | Device not listed in the DFU app | Issue `start ota` again (the mode times out), enable `Force Scanning` |
 | Node dead after a failed OTA | Without the OTAFIX bootloader, only on-site USB helps. Which is exactly why you install OTAFIX **first** |
