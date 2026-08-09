@@ -178,7 +178,20 @@ uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
   // transient/busy SPI read of the packet type glitches (getPacketType() defaults to 0xFF). Un-guarded
   // that error code reads as ~4.29e9 us -> a saturated airtime estimate that poisons budget/airtime math
   // (spurious fwd-reserve drop + wrecked fwd.scoped.stats). See ACETyr/MeshCore#2.
-  if ((int32_t)t < 0) return 0;
+  //
+  // Every caller treats a too-LARGE estimate as conservative and a too-SMALL one as unsafe: at
+  // Dispatcher.cpp:327 the estimate sets outbound_expiry, so returning 0 puts the deadline at now and
+  // aborts the transmit that is still in flight (ACETyr/MeshCore#4). Fall back to a full-MTU packet
+  // instead -- an upper bound for anything we can send, and never zero.
+  if ((int32_t)t < 0) return _airtime_full_ms;
+
+  // Airtime is (fixed preamble/header overhead + k * len), so scaling a good sample up to
+  // MAX_TRANS_UNIT is >= the airtime of any packet, whatever the length asked for. Re-derived on
+  // every good read, so it follows `set radio` changes. Short packets are skipped as anchors: their
+  // airtime is mostly the fixed overhead, and scaling that up by 255/len over-estimates wildly.
+  if (len_bytes >= AIRTIME_ANCHOR_MIN_BYTES) {
+    _airtime_full_ms = (uint32_t)(((uint64_t)t * MAX_TRANS_UNIT) / len_bytes / 1000);
+  }
   return t / 1000;
 }
 

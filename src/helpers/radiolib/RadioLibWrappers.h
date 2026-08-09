@@ -13,6 +13,10 @@ struct PacketMillis {
 
 #define NUM_NOISE_FLOOR_SAMPLES  64   // RSSI samples reduced to a median per noise-floor calibration block
 
+// Fallback estimate used when getTimeOnAir() returns an error code -- see getEstAirtimeFor().
+#define AIRTIME_ANCHOR_MIN_BYTES   32     // shorter reads are too overhead-dominated to scale up from
+#define AIRTIME_FALLBACK_INIT_MS 5000     // only until the first good read lands; pessimistic on purpose
+
 class RadioLibWrapper : public mesh::Radio {
 protected:
   PhysicalLayer* _radio;
@@ -24,6 +28,7 @@ protected:
   int16_t _floor_samples[NUM_NOISE_FLOOR_SAMPLES];
   bool _floor_block_ready;   // true once a full block has been reduced to a median (waits for trigger to restart)
   uint8_t _preamble_sf;
+  uint32_t _airtime_full_ms; // last good estimate scaled to a full-MTU packet; the getTimeOnAir() fallback
 
   void idle();
   void startRecv();
@@ -32,7 +37,7 @@ protected:
   virtual void doResetAGC();
 
 public:
-  RadioLibWrapper(PhysicalLayer& radio, mesh::MainBoard& board) : _radio(&radio), _board(&board), _preamble_sf(0) { n_recv = n_sent = 0; }
+  RadioLibWrapper(PhysicalLayer& radio, mesh::MainBoard& board) : _radio(&radio), _board(&board), _preamble_sf(0), _airtime_full_ms(AIRTIME_FALLBACK_INIT_MS) { n_recv = n_sent = 0; }
 
   void begin() override;
   virtual void powerOff() { _radio->sleep(); }
