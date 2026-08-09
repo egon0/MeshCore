@@ -3,14 +3,14 @@
 *🇩🇪 [Deutsche Fassung](./forward-filter.de.md) (primary) · 📻 [Flashing guide](./flashing-repeater.md)*
 
 This manual documents **every** forward-filter feature of the ACETyr repeater firmware
-(`repeater-v1.16.0.fwdfilterN`) in one place. It supersedes the per-release descriptions — from now on
+(`repeater-v1.17.0.fwdfilterN`) in one place. It supersedes the per-release descriptions — from now on
 the release notes only record *what changed*, this document describes *what the firmware does*.
 
 ---
 
 ## Read this first
 
-**Every filter ships disabled.** A freshly flashed node behaves exactly like a stock MeshCore 1.16.0
+**Every filter ships disabled.** A freshly flashed node behaves exactly like a stock MeshCore 1.17.0
 repeater. Nothing happens until you switch something on yourself.
 
 All filters act **locally on this one node** — there is no protocol change and no coordination with
@@ -198,6 +198,25 @@ within the current window that the remainder no longer covers another unscoped p
 
 Only this node's **transmit budget** is reserved, not the RF channel.
 
+### Measured behaviour
+
+Two runs under identical load (93 flood adverts each, `dutycycle 10`, so a 6000 ms allowance per
+window):
+
+| Reserve | forwarded | dropped | peak airtime in the window |
+|---|---|---|---|
+| `0` | 93 | 0 | **7733** / 6000 ms — 129 % |
+| `50` | 24 | 69 | 2579 / 6000 ms — 43 % |
+
+Without a reserve this load overruns the window allowance by 29 %. At a 50 % reserve the node
+forwards the first packets and then holds airtime flat at 2577–2579 ms, across all seven sample
+points.
+
+So the reserve **does not switch off, it settles.** At the holding point 3423 ms were still available
+against a threshold of 2400 ms reserve plus roughly 500 ms for the next packet — the node leaves
+about 57 % of the allowance free against a 50 % reserve rather than tipping over at a fixed line. How
+much actually gets through therefore depends on the load, not on the configured value alone.
+
 > **Set this carefully at very low duty cycles.** The allowance shrinks with the duty cycle, but a
 > single packet is still ~500 ms. At `set dutycycle 1` only 600 ms per window is available — one
 > packet nearly fills the whole allowance, and any reserve above 0 will then drop practically every
@@ -326,12 +345,14 @@ set fwd.hashfilter off
 ## Where the settings live
 
 All `fwd.*` and `flood.max.*` settings are stored in a dedicated file **`/fwd_prefs`** on the node's
-filesystem, in a self-describing TLV format. The mainline settings file `/com_prefs` is untouched and
-stays byte-for-byte identical to mainline.
+filesystem, in a self-describing TLV format. The mainline settings live entirely separately in their
+own file — since 1.17 that is `/prefs.json`, before it was the `/com_prefs` blob.
 
-That is not cosmetic. If the filter fields were written into `/com_prefs`, a future mainline merge that
+That is not cosmetic. If the filter fields were written into the mainline file, a mainline merge that
 inserts a field there could shift offsets — and then radio or region settings get silently reinterpreted
-as filter values. Keeping them separate makes that impossible by construction.
+as filter values. Keeping them separate makes that impossible by construction. The change of the
+mainline format from `/com_prefs` to `/prefs.json` in 1.17 is exactly that case: `/fwd_prefs` was
+unaffected.
 
 Practical consequences:
 
@@ -342,6 +363,10 @@ Practical consequences:
 - **Upgrading from fwdfilter3 to fwdfilter4 or newer** resets the filter configuration once (the move
   from `/com_prefs` to `/fwd_prefs`). Re-add whitelist and blacklist entries afterwards. Radio and
   region settings are preserved. From fwdfilter4 onward the configuration survives every upgrade.
+- **Upgrading to fwdfilter8** migrates the *mainline* settings once, from `/com_prefs` to
+  `/prefs.json`. The filter configuration is unaffected, but going back to older firmware has
+  consequences — see
+  [Downgrading from fwdfilter8](./flashing-repeater.md#downgrading-from-fwdfilter8).
 
 ---
 
@@ -356,6 +381,7 @@ Practical consequences:
 | `fwdfilter5` | 2026-06-21 | New build target SenseCAP Solar Node P1 (no functional change) |
 | `fwdfilter6` | 2026-07-10 | Stage 4 (`fwd.scoped.reserve`) + `get fwd.scoped.stats` |
 | `fwdfilter7` | 2026-07-13 | Fix: airtime estimate guarded against error codes · version string gained a leading `v` |
+| `fwdfilter8` | 2026-08-10 | Rebased onto MeshCore 1.17.0 · Fix: stage 4 measures over a 60 s window instead of the hour bucket (1–99 was previously inert) · Fix: noise-floor estimator could latch at −120 · Fix: the guarded airtime estimate aborted in-flight transmits |
 
 **Recommendation: always run the newest release.** Every older one carries at least one of the bugs
 fixed above.
@@ -370,8 +396,13 @@ fixed above.
   table. The entries are still active.
 - **Statistics counters are volatile** (see stage 4) and count the forwarding decision, not confirmed
   transmission.
-- **The airtime reserve works on an hour timescale.** The duty-cycle bucket needs sustained load to
-  drain. Short bursts of unscoped traffic pass even at a high reserve — by design.
+- **The airtime window is a fixed 60 seconds**, not a setting. The length is a trade-off: short
+  enough that a flood storm becomes visible, long enough that single packets do not dominate the
+  result. It is not a measured optimum.
+- **The window is tumbling, not sliding.** A burst arriving just after a window rolls over gets the
+  full allowance — the reserve damps sustained load, not every individual peak.
+- **The load measurement above used flood adverts.** Under mixed real traffic — larger payloads,
+  different airtime per packet — the behaviour is inferred, not measured.
 - **Path prune is unreliable at 1-byte hashes**, because the path hop is ambiguous. Reliable at
   multibyte hash sizes.
 

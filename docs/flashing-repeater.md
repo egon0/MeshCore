@@ -2,7 +2,7 @@
 
 *🇩🇪 [Deutsche Fassung](./flashing-repeater.de.md) (primary) · ⚙️ [Forward-filter manual](./forward-filter.md)*
 
-This guide covers how to get the ACETyr repeater firmware (`repeater-v1.16.0.fwdfilterN`) onto a
+This guide covers how to get the ACETyr repeater firmware (`repeater-v1.17.0.fwdfilterN`) onto a
 device — with the web flasher, with esptool, and over the air.
 
 The **[MeshCore web flasher](https://flasher.meshcore.io)** is the recommended route, same as for the
@@ -73,11 +73,14 @@ For scripting and bulk flashing. `pip install esptool`, then:
 
 ```bash
 # update a running node — configuration preserved
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106.bin
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.17.0.fwdfilter8-<sha>.bin
 
 # fresh install — erases the identity
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.17.0.fwdfilter8-<sha>-merged.bin
 ```
+
+`<sha>` is the short commit hash in the name of the file you downloaded — just use the actual
+filename from the release.
 
 On Linux/macOS use the appropriate port instead of `COM5` (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`). If
 the connection is unstable, drop the baud rate to `115200`.
@@ -139,7 +142,7 @@ At the CLI:
 
 ```
 ver
-> v1.16.0.fwdfilter7-a57a106 (Build: …)
+> v1.17.0.fwdfilter8-<sha> (Build: …)
 ```
 
 If the version matches the release, the device has the right firmware. Cross-check that the fork
@@ -152,6 +155,37 @@ get fwd.hashfilter
 
 If the node answers with an error instead of a status, it is running mainline firmware without the
 forward filter.
+
+---
+
+## Check the duty cycle
+
+Before the node transmits for any length of time: **check the duty cycle and set it to whatever is
+permitted at your location.**
+
+```
+get dutycycle
+set dutycycle <value>     # 1-100, in percent
+```
+
+> ⚠️ **The shipped value is not a permitted value.** The firmware starts with an airtime factor of
+> 1.0, which is a **50 %** duty cycle. In most of the bands MeshCore is operated in that is far above
+> the permitted share. The default is a technical setting inherited from mainline firmware, not a
+> statement about what you are allowed to transmit.
+
+Which value is correct depends on the band, the channel and the legal situation where your node
+stands. Knowing and observing that is **solely the responsibility of the node's operator** — this
+firmware is distributed internationally and cannot name a number for you. If in doubt, ask your
+national regulator or amateur radio society.
+
+The value does more than keep you legal: the airtime reserve in
+[stage 4](./forward-filter.md#stage-4--airtime-reserve-for-scoped-traffic) derives its window
+allowance directly from the duty cycle, so a wrong duty cycle also skews the filter behaviour.
+
+> ℹ️ **`set af` is the old route** and works on the reciprocal (`af = 100 / duty cycle − 1`). MeshCore
+> 1.15 added `set dutycycle`, which takes plain percent. Use `dutycycle`; `af` only remains for
+> compatibility. Older nodes that answer `get dutycycle` with `??` are running pre-1.15 firmware and
+> have to be set through `af`.
 
 ---
 
@@ -189,6 +223,33 @@ Two exceptions:
   move to the dedicated `/fwd_prefs` file). Re-add whitelist and blacklist entries afterwards — best
   to run `get fwd.whitelist` and `get fwd.block` beforehand and keep the output. Everything else is
   preserved.
+
+---
+
+## Downgrading from fwdfilter8
+
+`fwdfilter8` is based on MeshCore 1.17, and 1.17 changed the format of the settings file: instead of
+the old `/com_prefs` blob it now writes `/prefs.json`.
+
+On the first boot after the upgrade the firmware reads the existing `/com_prefs` one last time and
+writes only `/prefs.json` from then on. Nothing changes for you: all settings migrate automatically,
+there is nothing to do.
+
+> ⚠️ **The old `/com_prefs` is left in place and is never updated again.** It freezes at the state
+> the node was in immediately before the upgrade.
+>
+> If you later flash a version older than `fwdfilter8`, that firmware does not know `/prefs.json` and
+> reads the frozen `/com_prefs`. **Every change you made since upgrading to fwdfilter8 is then
+> silently gone** — no error, the node simply carries on with the old configuration. Radio, region
+> and node settings are affected.
+
+The filter configuration in `/fwd_prefs` is **not** affected: it lives in its own file and survives
+the move in both directions.
+
+If you are planning a downgrade, write down the current state first — `get radio`, `get name`,
+`get dutycycle` and whatever else you changed — and set it again afterwards.
+
+---
 
 ## Going back to mainline
 

@@ -3,7 +3,7 @@
 *🇬🇧 [English version](./flashing-repeater.md) · ⚙️ [Forward-Filter-Handbuch](./forward-filter.de.md)*
 
 Diese Anleitung beschreibt, wie du die ACETyr-Repeater-Firmware
-(`repeater-v1.16.0.fwdfilterN`) auf ein Gerät bekommst — mit dem Webflasher, per esptool und über
+(`repeater-v1.17.0.fwdfilterN`) auf ein Gerät bekommst — mit dem Webflasher, per esptool und über
 Funk (OTA).
 
 Der **[MeshCore-Webflasher](https://flasher.meshcore.io)** ist der empfohlene Weg, so wie bei der
@@ -74,11 +74,14 @@ Für Skripte und Massenflash. `pip install esptool`, dann:
 
 ```bash
 # Update eines laufenden Knotens — Konfiguration bleibt erhalten
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106.bin
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x10000 Heltec_v3_repeater-v1.17.0.fwdfilter8-<sha>.bin
 
 # Erstflash / komplett neu aufsetzen — löscht die Identität
-esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.16.0.fwdfilter7-a57a106-merged.bin
+esptool.py --chip esp32s3 --port COM5 --baud 921600 write_flash 0x0 Heltec_v3_repeater-v1.17.0.fwdfilter8-<sha>-merged.bin
 ```
+
+`<sha>` ist der Commit-Kurzhash im Namen der heruntergeladenen Datei — einfach den tatsächlichen
+Dateinamen aus dem Release einsetzen.
 
 Unter Linux/macOS statt `COM5` den passenden Port angeben (`/dev/ttyUSB0`, `/dev/cu.usbserial-…`).
 Bei Verbindungsproblemen die Baudrate auf `115200` senken.
@@ -141,7 +144,7 @@ An der CLI:
 
 ```
 ver
-> v1.16.0.fwdfilter7-a57a106 (Build: …)
+> v1.17.0.fwdfilter8-<sha> (Build: …)
 ```
 
 Stimmt die Versionsnummer mit dem Release überein, hat das Gerät die richtige Firmware. Gegenprobe,
@@ -154,6 +157,38 @@ get fwd.hashfilter
 
 Antwortet die Node hier mit einem Fehler statt mit dem Status, läuft Mainline-Firmware ohne
 Forward-Filter.
+
+---
+
+## Duty Cycle prüfen
+
+Bevor der Knoten dauerhaft sendet: **prüfe den Duty Cycle und stelle ihn auf das ein, was an deinem
+Standort zulässig ist.**
+
+```
+get dutycycle
+set dutycycle <wert>      # 1-100, in Prozent
+```
+
+> ⚠️ **Der Auslieferungswert ist kein zulässiger Wert.** Die Firmware startet mit einem
+> Airtime-Faktor von 1.0, das entspricht **50 %** Duty Cycle. In den meisten Funkbändern, in denen
+> MeshCore betrieben wird, liegt das weit über dem erlaubten Anteil. Der Standardwert ist eine
+> technische Vorgabe der Mainline-Firmware und keine Aussage darüber, was du senden darfst.
+
+Welcher Wert korrekt ist, hängt vom Band, vom Kanal und von der Rechtslage an deinem Standort ab. Das
+zu kennen und einzuhalten **liegt allein beim Betreiber der Node** — diese Firmware wird
+international verteilt und kann dir keine Zahl nennen. Frage im Zweifel deine nationale
+Regulierungsbehörde oder den zuständigen Amateurfunkverband.
+
+Der Wert wirkt auf mehr als nur die Legalität: die Airtime-Reserve aus
+[Stufe 4](./forward-filter.de.md#stufe-4--airtime-reserve-für-scoped-traffic) leitet ihre
+Fensterzuteilung direkt aus dem Duty Cycle ab. Ein falsch gesetzter Duty Cycle verstellt damit auch
+das Filterverhalten.
+
+> ℹ️ **`set af` ist der alte Weg** und rechnet mit dem Kehrwert (`af = 100 / Duty Cycle − 1`). Seit
+> MeshCore 1.15 gibt es `set dutycycle`, das direkt in Prozent arbeitet. Nimm `dutycycle`; `af` bleibt
+> nur aus Kompatibilitätsgründen erhalten. Ältere Knoten, die auf `get dutycycle` mit `??` antworten,
+> laufen mit Firmware vor 1.15 und müssen über `af` gesetzt werden.
 
 ---
 
@@ -193,6 +228,33 @@ Zwei Ausnahmen:
   zurückgesetzt (Umstellung auf die eigene `/fwd_prefs`-Datei). Whitelist- und Blacklist-Einträge
   danach neu setzen — am besten vorher `get fwd.whitelist` und `get fwd.block` abfragen und die
   Ausgabe aufheben. Alles andere bleibt erhalten.
+
+---
+
+## Downgrade nach fwdfilter8
+
+`fwdfilter8` setzt auf MeshCore 1.17 auf, und 1.17 hat das Format der Einstellungsdatei gewechselt:
+statt des alten Blobs `/com_prefs` wird jetzt `/prefs.json` geschrieben.
+
+Beim ersten Start nach dem Update liest die Firmware die vorhandene `/com_prefs` noch einmal ein und
+schreibt von da an ausschließlich `/prefs.json`. Für dich ändert sich dabei nichts: alle
+Einstellungen wandern automatisch mit, es ist nichts zu tun.
+
+> ⚠️ **Die alte `/com_prefs` bleibt liegen und wird ab diesem Zeitpunkt nicht mehr aktualisiert.**
+> Sie friert auf dem Stand ein, den der Knoten unmittelbar vor dem Update hatte.
+>
+> Flasht du später wieder eine Version vor `fwdfilter8`, kennt diese `/prefs.json` nicht und liest die
+> eingefrorene `/com_prefs`. **Alle Änderungen, die du seit dem Update auf fwdfilter8 gemacht hast,
+> sind damit stillschweigend weg** — ohne Fehlermeldung, der Knoten läuft einfach mit der alten
+> Konfiguration weiter. Betroffen sind Funk-, Regions- und Node-Einstellungen.
+
+Die Filterkonfiguration in `/fwd_prefs` ist davon **nicht** betroffen: sie liegt in einer eigenen
+Datei und übersteht den Wechsel in beide Richtungen.
+
+Wenn du einen Downgrade planst, notiere dir vorher den Stand — `get radio`, `get name`,
+`get dutycycle` und was du sonst verstellt hast — und setze ihn danach neu.
+
+---
 
 ## Zurück auf Mainline
 

@@ -3,7 +3,7 @@
 *🇬🇧 [English version](./forward-filter.md) · 📻 [Flash-Anleitung](./flashing-repeater.de.md)*
 
 Dieses Handbuch beschreibt **alle** Forward-Filter-Funktionen der ACETyr-Repeater-Firmware
-(`repeater-v1.16.0.fwdfilterN`) an einer Stelle. Es ersetzt die über die einzelnen Releases verteilten
+(`repeater-v1.17.0.fwdfilterN`) an einer Stelle. Es ersetzt die über die einzelnen Releases verteilten
 Beschreibungen — die Release-Notes dokumentieren ab jetzt nur noch, *was sich geändert hat*, dieses
 Dokument beschreibt, *was das Gerät kann*.
 
@@ -12,7 +12,7 @@ Dokument beschreibt, *was das Gerät kann*.
 ## Das Wichtigste zuerst
 
 **Alle Filter sind ab Werk ausgeschaltet.** Eine frisch geflashte Node verhält sich exakt wie ein
-Standard-MeshCore-1.16.0-Repeater. Es passiert nichts, solange du nicht selbst etwas einschaltest.
+Standard-MeshCore-1.17.0-Repeater. Es passiert nichts, solange du nicht selbst etwas einschaltest.
 
 Die Filter greifen ausschließlich **lokal auf diesem einen Knoten** — es gibt keine Protokolländerung,
 keine Absprache mit anderen Nodes. Ein Netz aus gemischter Firmware ist unproblematisch, ein einzelner
@@ -202,6 +202,25 @@ Fenster so viel gesendet hat, dass der Rest für ein weiteres unscoped Paket nic
 
 Freigehalten wird ausschließlich das **Sendebudget dieses Knotens**, nicht der Funkkanal.
 
+### Gemessenes Verhalten
+
+Zwei Durchläufe mit identischer Last (je 93 Flood-Adverts, `dutycycle 10`, also 6000 ms Zuteilung je
+Fenster):
+
+| Reserve | weitergeleitet | verworfen | Airtime-Spitze im Fenster |
+|---|---|---|---|
+| `0` | 93 | 0 | **7733** / 6000 ms — 129 % |
+| `50` | 24 | 69 | 2579 / 6000 ms — 43 % |
+
+Ohne Reserve überzieht diese Last die Fensterzuteilung um 29 %. Mit 50 % Reserve leitet der Knoten die
+ersten Pakete weiter und hält die Airtime danach flach bei 2577–2579 ms, über alle sieben Messpunkte
+hinweg.
+
+Die Reserve **schaltet also nicht ab, sie regelt sich ein.** Am Haltepunkt standen noch 3423 ms zur
+Verfügung, gegen eine Schwelle von 2400 ms Reserve plus rund 500 ms für das nächste Paket — der Knoten
+lässt gegen eine 50-%-Reserve rund 57 % der Zuteilung frei, statt an einer festen Grenze umzukippen.
+Wie viel tatsächlich durchkommt, hängt damit an der Last und nicht am eingestellten Wert allein.
+
 > **Bei sehr niedrigem Duty Cycle vorsichtig einstellen.** Die Zuteilung schrumpft mit, ein einzelnes
 > Paket bleibt aber ~500 ms groß. Bei `set dutycycle 1` stehen nur 600 ms je Fenster zur Verfügung —
 > ein einziges Paket füllt die Zuteilung fast vollständig aus, und dann verwirft jede Reserve über 0
@@ -331,13 +350,14 @@ set fwd.hashfilter off
 
 Alle `fwd.*`- und `flood.max.*`-Einstellungen werden in einer eigenen Datei **`/fwd_prefs`** im
 Dateisystem des Knotens gespeichert, in einem selbstbeschreibenden TLV-Format. Die
-Mainline-Einstellungsdatei `/com_prefs` bleibt davon unberührt und Byte-für-Byte identisch zur
-Mainline.
+Mainline-Einstellungen liegen davon vollständig getrennt in ihrer eigenen Datei — seit 1.17 ist das
+`/prefs.json`, davor war es der Blob `/com_prefs`.
 
-Das ist keine Kosmetik: Würden die Filter-Felder in `/com_prefs` mitgeschrieben, könnte ein künftiger
+Das ist keine Kosmetik: Würden die Filter-Felder in der Mainline-Datei mitgeschrieben, könnte ein
 Mainline-Merge, der dort ein Feld einfügt, die Positionen verschieben — und dann werden Funk- oder
 Regionseinstellungen still gegen Filterwerte verrechnet. Durch die Trennung kann das
-konstruktionsbedingt nicht passieren.
+konstruktionsbedingt nicht passieren. Der Wechsel des Mainline-Formats von `/com_prefs` auf
+`/prefs.json` in 1.17 ist genau dieser Fall: `/fwd_prefs` war davon nicht betroffen.
 
 Praktische Folgen:
 
@@ -349,6 +369,10 @@ Praktische Folgen:
   Standardwerte zurückgesetzt (Umstellung von `/com_prefs` auf `/fwd_prefs`). Whitelist- und
   Blacklist-Einträge danach neu setzen. Funk- und Regionseinstellungen bleiben erhalten. Zwischen
   fwdfilter4 und allen neueren Versionen bleibt die Konfiguration erhalten.
+- **Beim Update auf fwdfilter8** wandern die *Mainline*-Einstellungen einmalig von `/com_prefs` nach
+  `/prefs.json`. Die Filterkonfiguration ist davon nicht betroffen, ein Rückschritt auf ältere Firmware
+  hat aber Folgen — siehe
+  [Downgrade nach fwdfilter8](./flashing-repeater.de.md#downgrade-nach-fwdfilter8).
 
 ---
 
@@ -363,6 +387,7 @@ Praktische Folgen:
 | `fwdfilter5` | 2026-06-21 | Neues Build-Ziel SenseCAP Solar Node P1 (keine Funktionsänderung) |
 | `fwdfilter6` | 2026-07-10 | Stufe 4 (`fwd.scoped.reserve`) + `get fwd.scoped.stats` |
 | `fwdfilter7` | 2026-07-13 | Fix: Airtime-Schätzung gegen Fehlercodes abgesichert · Version mit führendem `v` |
+| `fwdfilter8` | 2026-08-10 | Basis auf MeshCore 1.17.0 · Fix: Stufe 4 misst über ein 60-s-Fenster statt über den Stundenbucket (1–99 war zuvor wirkungslos) · Fix: Rauschgrund-Schätzer klemmte auf −120 fest · Fix: abgesicherte Airtime-Schätzung brach laufende Sendungen ab |
 
 **Empfehlung: immer die neueste Version.** Alle älteren enthalten mindestens einen der oben
 behobenen Fehler.
@@ -377,8 +402,13 @@ behobenen Fehler.
   nicht alle Einträge an. Die Einträge sind trotzdem aktiv.
 - **Statistikzähler sind flüchtig** (siehe Stufe 4) und zählen die Weiterleitungs-Entscheidung, nicht
   das bestätigte Senden.
-- **Die Airtime-Reserve wirkt auf Stundenskala.** Der Duty-Cycle-Bucket braucht anhaltende Last, um zu
-  leeren. Kurze Bursts unscoped Traffic passieren, auch bei hoher Reserve — so gewollt.
+- **Das Airtime-Fenster ist ein fester 60-Sekunden-Wert**, keine Einstellung. Die Länge ist eine
+  Abwägung: kurz genug, dass ein Flood-Sturm sichtbar wird, lang genug, dass einzelne Pakete das
+  Ergebnis nicht dominieren. Ein gemessenes Optimum ist sie nicht.
+- **Das Fenster ist rollend, nicht gleitend.** Ein Burst, der kurz nach einem Fensterwechsel eintrifft,
+  bekommt die volle Zuteilung — die Reserve dämpft anhaltende Last, nicht jede einzelne Spitze.
+- **Die Lastmessung oben wurde mit Flood-Adverts gefahren.** Bei gemischtem Realverkehr — größere
+  Nutzlasten, andere Airtime pro Paket — ist das Verhalten hergeleitet, nicht gemessen.
 - **Path-Prune ist bei 1-Byte-Hashes unzuverlässig**, weil der Pfad-Hop mehrdeutig ist. Bei
   Mehrbyte-Hashes zuverlässig.
 
