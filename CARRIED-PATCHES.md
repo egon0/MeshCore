@@ -49,6 +49,13 @@ to drop `a028adcb`'s hunks wholesale and take upstream's version, then re-run th
 because #2842's absolute clamps (`noise.clamp.low` default -125) interact with the -120 behaviour we
 tested against.
 
+**Attribution is owed and unpaid.** `a028adcb` is authored by this fork with no `Co-authored-by:`
+trailer, and it is already pushed, so amending would rewrite published history. Decision
+(2026-08-09): settle it in the **release notes** instead. Any release carrying this patch — starting
+with the first 1.17-based one — must credit usrflo and link #2933 by name in the notes, in both the
+German and English text. This is not optional garnish; it is the only place the credit now appears
+for anyone flashing the firmware.
+
 Do **not** re-submit this patch upstream under fork authorship. It is already filed as #2933.
 
 ---
