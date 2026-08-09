@@ -1,0 +1,66 @@
+# Carried upstream patches
+
+Changes in this fork that originate **upstream** and are carried ahead of mainline merging them.
+Listed so that provenance is visible without diffing, and so each one has a written removal
+condition instead of silently becoming permanent fork divergence.
+
+Fork-original work (the forward filter, `/fwd_prefs`, the airtime guard) is not listed here — see
+`FEATURE-*.md` and `docs/forward-filter.md` for those.
+
+---
+
+## Active
+
+### meshcore-dev/MeshCore#2933 — median noise-floor estimator
+
+| | |
+|---|---|
+| Upstream author | usrflo |
+| Upstream PR | https://github.com/meshcore-dev/MeshCore/pull/2933 (OPEN) |
+| Applied as | `a028adcb`, carried through the 1.17 replant |
+| Files | `src/helpers/radiolib/RadioLibWrappers.{h,cpp}` |
+| Fork issue | ACETyr/MeshCore#3 |
+
+**The patch is usrflo's work, applied essentially verbatim** — the `sortInt16()` helper, the
+explanatory comments and the `_floor_block_ready` flag are all his. This fork contributed only an
+independent bench reproduction, posted to the PR on 2026-08-09.
+
+**What it fixes.** `RadioLibWrapper::loop()` admitted a noise-floor sample only if
+`rssi < _noise_floor + SAMPLING_THRESHOLD`, a one-way ratchet: each 64-sample block mean came from a
+lower-truncated set, walked down to the -120 clamp and stuck there, leaving the RSSI-margin LBT
+permanently over-sensitive. The patch accepts every idle sample and reduces the block to its median,
+which recovers in both directions.
+
+**Why carried rather than waited out.** Reproduced on our own hardware and verified fixed: 250
+zero-hop adverts at 0.4 s wedges a stock node at -120 in 18.9 s; the patched build under identical
+stimulus holds -104 with 56 blocks in 199 s, 15 up / 14 down. Mainline 1.17 and current `dev` both
+still ship the ratchet.
+
+**Removal condition.** Drop this patch when mainline merges a fix for the ratchet, then re-verify on
+the bench rig before release. Two competing PRs are open and neither has a maintainer review:
+
+- **#2933** (usrflo) — what we carry. +42/-22 across 2 files.
+- **#2842** (yg-ht) — same root cause, much broader: absolute clamps, `noise.sample.ms` /
+  `noise.window.secs` / `noise.clamp.low` / `noise.clamp.high`, a `stats-noise` CLI, unit tests and
+  VNA cross-validation. +1235/-61 across 22 files.
+
+If **#2842** wins, this is not a clean revert — it rewrites the estimator our patch touches. Expect
+to drop `a028adcb`'s hunks wholesale and take upstream's version, then re-run the bench stimulus,
+because #2842's absolute clamps (`noise.clamp.low` default -125) interact with the -120 behaviour we
+tested against.
+
+Do **not** re-submit this patch upstream under fork authorship. It is already filed as #2933.
+
+---
+
+## Resolved
+
+### meshcore-dev/MeshCore#2797 — per-payload flood hop caps
+
+Folded into the fork at `628b7689` (fwdfilter4) with its `atoi` off-by-one fixed. **Landed in
+mainline 1.17** as `flood_max` / `flood_max_unscoped` / `flood_max_advert` with the same 64/64/8
+defaults, so the 1.17 replant deduplicated it automatically — the fork copy and mainline's merged as
+identical text. No longer carried.
+
+The fork's own additional caps (`fwd.flood.max.request`, `.anon_request`, `.response`) live in
+`/fwd_prefs` and are unrelated to #2797.
