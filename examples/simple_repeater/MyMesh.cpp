@@ -423,6 +423,18 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
   }
 }
 
+unsigned long MyMesh::airWindowUsed() {
+  unsigned long now = _ms->getMillis();
+  // Tumbling window: on expiry, re-base against the running TX-airtime total rather than keeping a
+  // ring of samples. One window of lag is immaterial against the hour-scale bucket this replaces.
+  if (air_win_start == 0 || (now - air_win_start) >= FWD_AIR_WINDOW_MS) {
+    air_win_start = now;
+    air_win_base = getTotalAirTime();
+  }
+  unsigned long total = getTotalAirTime();
+  return (total >= air_win_base) ? (total - air_win_base) : 0;   // guard the counter reset on reboot
+}
+
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
   // [fwd-filter Stage 1] Net-health: throttle forwarding of unidentifiable 1-byte path-hash traffic
@@ -494,13 +506,19 @@ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (packet->isRouteFlood() && recv_pkt_region != NULL) {
     if (recv_pkt_region->isWildcard()) {                 // unscoped flood (wildcard region, flood-allowed)
       if (_fwd_prefs.scoped_reserve_pct > 0) {
-        unsigned long max_budget = (unsigned long)(getDutyCycleWindowMs() / (1.0f + getAirtimeBudgetFactor()));
-        unsigned long reserve_ms = (unsigned long)((uint64_t)max_budget * _fwd_prefs.scoped_reserve_pct / 100);
+        // Measured over FWD_AIR_WINDOW_MS, NOT the Dispatcher's one-hour duty-cycle bucket. The
+        // bucket is a regulatory accumulator whose slack (360000 ms at a legal 10% duty) swallows
+        // any realistic burst, so a percentage of it could only trip at 100%. The short window
+        // carries the same duty-cycle-derived allowance over a span where a burst is visible.
+        unsigned long win_max = airWindowMax();
+        unsigned long used = airWindowUsed();
+        unsigned long remaining = (win_max > used) ? (win_max - used) : 0;
+        unsigned long reserve_ms = (unsigned long)((uint64_t)win_max * _fwd_prefs.scoped_reserve_pct / 100);
         uint32_t est = _radio->getEstAirtimeFor(packet->getRawLength());
-        if (getRemainingTxBudget() < reserve_ms + est) {
+        if (remaining < reserve_ms + est) {
           n_drop_unscoped++; airtime_saved_unscoped += est;
-          MESH_DEBUG_PRINTLN("fwd-filter: drop unscoped flood (airtime reserve %d%%, budget=%lu reserve=%lu)",
-                             (int)_fwd_prefs.scoped_reserve_pct, getRemainingTxBudget(), reserve_ms);
+          MESH_DEBUG_PRINTLN("fwd-filter: drop unscoped flood (reserve %d%%, air %lu/%lums used, remaining=%lu reserve=%lu)",
+                             (int)_fwd_prefs.scoped_reserve_pct, used, win_max, remaining, reserve_ms);
           return false;
         }
       }
@@ -979,6 +997,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   recv_pkt_region = NULL;
   n_fwd_scoped = n_fwd_unscoped = n_drop_unscoped = 0;
   airtime_saved_unscoped = 0;
+  air_win_start = air_win_base = 0;
 
 #if MAX_NEIGHBOURS
   memset(neighbours, 0, sizeof(neighbours));
@@ -1550,15 +1569,13 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
     } else if (memcmp(config, "fwd.scoped.reserve", 18) == 0) {   // dedicated getter (set/get symmetry)
       sprintf(reply, "> %d", (int)_fwd_prefs.scoped_reserve_pct);
     } else if (memcmp(config, "fwd.scoped.stats", 16) == 0) {
-      // budget= is the gate's actual input: the duty-cycle token bucket, remaining/max in ms.
-      // It refills at the configured duty cycle and is capped at max, so on any node transmitting
-      // less than its duty-cycle limit it sits pinned at max and the reserve can never engage
-      // below 100%. Reporting it makes that observable instead of something you have to derive.
-      unsigned long max_budget = (unsigned long)(getDutyCycleWindowMs() / (1.0f + getAirtimeBudgetFactor()));
-      sprintf(reply, "> reserve=%d%% fwd_scoped=%lu fwd_unscoped=%lu drop_unscoped=%lu saved_air=%lums budget=%lu/%lums",
+      // air= is the gate's actual input: TX airtime used within the current short window, over the
+      // allowance for that window (which scales with the operator's configured duty cycle). Reported
+      // so the reserve's behaviour is observable on a live node instead of derived from the source.
+      sprintf(reply, "> reserve=%d%% fwd_scoped=%lu fwd_unscoped=%lu drop_unscoped=%lu saved_air=%lums air=%lu/%lums/%ds",
               (int)_fwd_prefs.scoped_reserve_pct, (unsigned long)n_fwd_scoped, (unsigned long)n_fwd_unscoped,
               (unsigned long)n_drop_unscoped, (unsigned long)airtime_saved_unscoped,
-              (unsigned long)getRemainingTxBudget(), max_budget);
+              airWindowUsed(), airWindowMax(), (int)(FWD_AIR_WINDOW_MS / 1000));
     } else {
       return false;   // not a fwd 'get' -> let CommonCLI handle it
     }

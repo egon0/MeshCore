@@ -82,6 +82,13 @@ struct NeighbourInfo {
 
 #define PACKET_LOG_FILE  "/packet_log"
 
+// Observation window for the scoped-reserve airtime gate. Deliberately short: the point of the
+// reserve is to notice a burst, and the Dispatcher's one-hour duty-cycle bucket cannot. At a legal
+// 10% duty this window allows 6000 ms of TX, roughly 12 packets at our SF8 preset -- a scale where
+// a flood storm actually registers. Fixed rather than another CLI knob: an operator has no way to
+// pick this number, and a knob whose values do nothing is the bug being fixed here.
+#define FWD_AIR_WINDOW_MS  60000
+
 class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   FILESYSTEM* _fs;
   uint32_t last_millis;
@@ -96,6 +103,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   // aggregate externally (observer polls `get fwd.scoped.stats` / MQTT) -- the reboot reset is not data loss.
   uint32_t n_fwd_scoped, n_fwd_unscoped, n_drop_unscoped;
   uint32_t airtime_saved_unscoped;   // ms of estimated airtime saved by dropping unscoped floods
+  // Short TX-airtime window backing the scoped reserve (see airWindowUsed()). Tumbling, not rolling:
+  // cheap, and one window of lag is irrelevant next to the hour it replaces.
+  unsigned long air_win_start;       // millis at the start of the current window (0 = not yet started)
+  unsigned long air_win_base;        // getTotalAirTime() sampled at window start
   ClientACL  acl;
   CommonCLI _cli;
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
@@ -138,6 +149,22 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
   bool handleFwdCommand(char* command, char* reply);   // intercepts fwd.* / flood.max.*request|response (serial + RF admin)
+
+  // Short-window TX airtime, the input to the scoped reserve gate.
+  //
+  // The Dispatcher's duty-cycle bucket is a REGULATORY accumulator over a one-hour window. At a
+  // legal 10% duty it carries 360000 ms of slack, so a flood storm costing ~10000 ms of relaying
+  // does not measurably move it -- which is why a reserve expressed as a percentage of it could
+  // only ever trip at 100%. Measured on hardware 2026-08-09: bucket pinned at 359325/360000 ms
+  // (99.8% full) while the node relayed a busy live mesh at 0.995% actual duty against a 10% limit.
+  //
+  // These measure the same airtime over FWD_AIR_WINDOW_MS instead. The allowance scales with the
+  // operator's configured duty cycle exactly as before, so the legal limit still governs; only the
+  // observation window changes, which is what makes a burst visible.
+  unsigned long airWindowMax() const {                 // allowance for one window, ms
+    return (unsigned long)(FWD_AIR_WINDOW_MS / (1.0f + getAirtimeBudgetFactor()));
+  }
+  unsigned long airWindowUsed();                       // TX airtime used so far this window, ms
 
 protected:
   float getAirtimeBudgetFactor() const override {
