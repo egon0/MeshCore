@@ -37,7 +37,7 @@ management in the MeshCore app, admin login required). See
 | `set fwd.whitelist.add` | `<64-hex>` | — | Add a node to the whitelist (max. 16) |
 | `set fwd.whitelist.del` | `<hex prefix>` | — | Remove all entries matching the prefix |
 | `set fwd.whitelist.clear` | — | — | Empty the whitelist |
-| `set fwd.scoped.reserve` | `0`–`100` | `0` | Percent of the TX airtime budget reserved for scoped traffic |
+| `set fwd.scoped.reserve` | `0`–`100` | `0` | Percent of the airtime allowance (60 s window) kept free for scoped traffic |
 | `set flood.max.request` | `0`–`64` | `64` | Hop cap for flooded REQUEST packets |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop cap for flooded ANON_REQUEST packets |
 | `set flood.max.response` | `0`–`64` | `64` | Hop cap for flooded RESPONSE packets |
@@ -51,7 +51,7 @@ Every `set` has a matching `get`:
 | `get fwd.block` | `> 2 entries \| a1b2c3d4e5f6 P \| 9988776655ff PA` |
 | `get fwd.whitelist` | `> on 0hop=allow 3 entries \| a1b2c3d4e5f6 \| …` |
 | `get fwd.scoped.reserve` | `> 40` |
-| `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms` |
+| `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s` |
 | `get flood.max.request` | `> 64` |
 
 List output shows only the **6-byte prefix** of each pubkey; in `get fwd.block`, `P` = *prune* and
@@ -169,30 +169,53 @@ meaningful.
 
 ```
 set fwd.scoped.reserve 0     # off (default)
-set fwd.scoped.reserve 40    # reserve 40 % of the TX budget for scoped traffic
+set fwd.scoped.reserve 40    # keep 40 % of the airtime allowance free for scoped traffic
 ```
 
-Reserves that percentage of **this node's TX duty-cycle budget** for **scoped** (region-coded) flood
-traffic. As the budget approaches the reserve, **unscoped** floods are dropped; scoped floods and all
-direct traffic always pass regardless.
+Keeps that percentage of **this node's transmit airtime** free for **scoped** (region-coded) flood
+traffic. If the remaining allowance is no longer enough for another unscoped packet without eating
+into the reserve, that packet is dropped; scoped floods and all direct traffic always pass regardless.
 
-The mechanism is **load-adaptive** and needs no threshold tuning: the token bucket sits near full on a
-quiet channel, so unscoped traffic passes normally. Only under sustained load does the bucket drain
-and the reserve become a hard line — unscoped chokes first, scoped keeps its budget. Short bursts get
-through, sustained flooding does not.
+**The reference is a 60-second window, not the hourly budget.** The allowance per window follows
+directly from the configured duty cycle:
+
+```
+allowance per window = 60 s × duty cycle
+```
+
+At `set dutycycle 10` that is 6000 ms per window, roughly twelve packets at the SF8 preset. A 40 %
+reserve keeps 2400 ms of it free: unscoped floods are dropped once this node has transmitted enough
+within the current window that the remainder no longer covers another unscoped packet.
+
+> **Why not the duty-cycle budget itself?** Because nothing can be measured with it. The Dispatcher's
+> token bucket runs over a full hour and carries roughly 360,000 ms of slack at a legal 10 %. A flood
+> storm of twenty relays costs ~10,000 ms and disappears into it without trace. Measured on the bench:
+> bucket at 359,325/360,000 ms (99.8 % full) while the node was relaying a busy mesh at 0.995 % actual
+> duty against a 10 % limit. A percentage threshold on a permanently full bucket can only trip at
+> 100 %. Up to and including `fwdfilter7` the setting was therefore effectively a switch: 0 = off,
+> 100 = drop every unscoped flood, everything in between inert. The short window is the actual fix —
+> not a different threshold.
 
 Only this node's **transmit budget** is reserved, not the RF channel.
+
+> **Set this carefully at very low duty cycles.** The allowance shrinks with the duty cycle, but a
+> single packet is still ~500 ms. At `set dutycycle 1` only 600 ms per window is available — one
+> packet nearly fills the whole allowance, and any reserve above 0 will then drop practically every
+> unscoped flood regardless of load. Arithmetically correct, but rarely what you want.
 
 Checking the effect:
 
 ```
 get fwd.scoped.stats
-> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms
+> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s
 ```
 
 - `fwd_scoped` / `fwd_unscoped` — forwarded floods, split by scope
 - `drop_unscoped` — floods dropped by the reserve
 - `saved_air` — airtime saved as a result, in milliseconds
+- `air` — transmit airtime used in the current window / allowance / window length. This is the gate's
+  input: if the first value sits well below the second, the reserve does not engage, whatever it is
+  set to
 
 The counters count the **forwarding decision**, not confirmed transmission. They live in RAM and
 **reset to 0 on every reboot** — deliberately, since a per-packet counter in flash would wear out the
@@ -253,7 +276,8 @@ See [Safe deployment](#safe-deployment) — this is the case where the order mat
 ```
 set fwd.scoped.reserve 40
 ```
-Check `get fwd.scoped.stats` after a few hours and adjust. 100 drops unscoped floods as soon as there
+Check `get fwd.scoped.stats` after a few hours and adjust, watching `air=` to see whether the node
+ever gets near its allowance at all. 100 drops unscoped floods as soon as there
 is any budget pressure at all.
 
 ---

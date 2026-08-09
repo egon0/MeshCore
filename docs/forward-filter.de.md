@@ -38,7 +38,7 @@ Bedient wird alles über die **Admin-CLI**: lokal per USB oder aus der Ferne üb
 | `set fwd.whitelist.add` | `<64-hex>` | — | Knoten in die Whitelist aufnehmen (max. 16) |
 | `set fwd.whitelist.del` | `<hex-Präfix>` | — | Einträge mit passendem Präfix entfernen |
 | `set fwd.whitelist.clear` | — | — | Whitelist leeren |
-| `set fwd.scoped.reserve` | `0`–`100` | `0` | Prozent des TX-Airtime-Budgets für Scoped-Traffic reservieren |
+| `set fwd.scoped.reserve` | `0`–`100` | `0` | Prozent der Airtime-Zuteilung (60-s-Fenster) für Scoped-Traffic freihalten |
 | `set flood.max.request` | `0`–`64` | `64` | Hop-Limit für geflutete REQUEST-Pakete |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop-Limit für geflutete ANON_REQUEST-Pakete |
 | `set flood.max.response` | `0`–`64` | `64` | Hop-Limit für geflutete RESPONSE-Pakete |
@@ -52,7 +52,7 @@ Zu jedem `set` gibt es ein passendes `get`:
 | `get fwd.block` | `> 2 entries \| a1b2c3d4e5f6 P \| 9988776655ff PA` |
 | `get fwd.whitelist` | `> on 0hop=allow 3 entries \| a1b2c3d4e5f6 \| …` |
 | `get fwd.scoped.reserve` | `> 40` |
-| `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms` |
+| `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s` |
 | `get flood.max.request` | `> 64` |
 
 In den Listenausgaben steht pro Eintrag nur das **6-Byte-Präfix** des Pubkey; bei `get fwd.block`
@@ -172,30 +172,54 @@ der Vergleich ist aussagekräftig.
 
 ```
 set fwd.scoped.reserve 0     # aus (Standard)
-set fwd.scoped.reserve 40    # 40 % des TX-Budgets für Scoped-Traffic reservieren
+set fwd.scoped.reserve 40    # 40 % der Airtime-Zuteilung für Scoped-Traffic freihalten
 ```
 
-Reserviert den angegebenen Prozentsatz des **TX-Duty-Cycle-Budgets dieses Knotens** für **scoped**
-(region-codierten) Flood-Traffic. Nähert sich das Budget dieser Reserve, werden **unscoped** Floods
-verworfen; scoped Floods und der gesamte Direct-Traffic laufen unabhängig davon immer durch.
+Hält den angegebenen Prozentsatz der **Sende-Airtime dieses Knotens** für **scoped** (region-codierten)
+Flood-Traffic frei. Reicht die verbleibende Zuteilung nicht mehr für ein weiteres unscoped Paket, ohne
+die Reserve anzugreifen, wird dieses Paket verworfen; scoped Floods und sämtlicher Direct-Traffic
+laufen unabhängig davon immer durch.
 
-Der Mechanismus ist **lastadaptiv** und braucht keine Schwellwert-Pflege: Der Token-Bucket steht bei
-ruhigem Kanal nahe voll, dann passiert unscoped Traffic ganz normal. Erst unter anhaltender Last läuft
-der Bucket leer, und die Reserve wird zur harten Grenze — unscoped drosselt zuerst, scoped behält sein
-Budget. Kurze Bursts kommen also durch, dauerhaftes Fluten nicht.
+**Bezugsgröße ist ein 60-Sekunden-Fenster, nicht das Stundenbudget.** Die Zuteilung pro Fenster ergibt
+sich direkt aus dem eingestellten Duty Cycle:
 
-Reserviert wird ausschließlich das **Sendebudget dieses Knotens**, nicht der Funkkanal.
+```
+Zuteilung pro Fenster = 60 s × Duty Cycle
+```
+
+Bei `set dutycycle 10` sind das 6000 ms je Fenster, also rund zwölf Pakete im SF8-Preset. Eine Reserve
+von 40 % hält davon 2400 ms frei: unscoped Floods werden verworfen, sobald dieser Knoten im laufenden
+Fenster so viel gesendet hat, dass der Rest für ein weiteres unscoped Paket nicht mehr reicht.
+
+> **Warum nicht das Duty-Cycle-Budget selbst?** Weil sich damit nichts messen lässt. Der Token-Bucket
+> im Dispatcher läuft über eine ganze Stunde und hat bei legalen 10 % rund 360 000 ms Spielraum. Ein
+> Flood-Sturm aus zwanzig Weiterleitungen kostet ~10 000 ms und verschwindet darin spurlos. Auf der
+> Bench gemessen: Bucket bei 359 325/360 000 ms (99,8 % voll), während der Knoten ein belebtes Netz
+> weitergeleitet hat — bei 0,995 % tatsächlichem Duty Cycle gegen ein 10-%-Limit. Eine Prozentschwelle
+> auf einen dauerhaft vollen Bucket kann nur bei 100 % auslösen. Bis einschließlich `fwdfilter7` war
+> die Einstellung deshalb faktisch ein Schalter: 0 = aus, 100 = alle unscoped Floods verwerfen, alles
+> dazwischen wirkungslos. Das kurze Fenster ist der eigentliche Fix — nicht ein anderer Schwellwert.
+
+Freigehalten wird ausschließlich das **Sendebudget dieses Knotens**, nicht der Funkkanal.
+
+> **Bei sehr niedrigem Duty Cycle vorsichtig einstellen.** Die Zuteilung schrumpft mit, ein einzelnes
+> Paket bleibt aber ~500 ms groß. Bei `set dutycycle 1` stehen nur 600 ms je Fenster zur Verfügung —
+> ein einziges Paket füllt die Zuteilung fast vollständig aus, und dann verwirft jede Reserve über 0
+> praktisch jeden unscoped Flood, unabhängig von der Last. Rechnerisch korrekt, aber selten gewollt.
 
 Wirkung kontrollieren:
 
 ```
 get fwd.scoped.stats
-> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms
+> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s
 ```
 
 - `fwd_scoped` / `fwd_unscoped` — weitergeleitete Floods, nach Scope getrennt
 - `drop_unscoped` — von der Reserve verworfene Floods
 - `saved_air` — dadurch eingespartes Airtime in Millisekunden
+- `air` — im laufenden Fenster verbrauchte Sende-Airtime / Zuteilung / Fensterlänge. Das ist die
+  Eingangsgröße des Gates: liegt der erste Wert weit unter dem zweiten, greift die Reserve nicht, und
+  zwar unabhängig davon, was eingestellt ist
 
 Die Zähler zählen die **Weiterleitungs-Entscheidung**, nicht das bestätigte Senden. Sie liegen im RAM
 und **werden bei jedem Neustart auf 0 gesetzt** — das ist Absicht, ein Zähler pro Paket im Flash würde
