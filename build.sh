@@ -196,25 +196,32 @@ build_all_firmwares_by_suffix() {
   done
 }
 
+# fwdfilter fork: the repeater targets this fork ships.
+#
+# SINGLE SOURCE OF TRUTH. Two separate callers read it, and they must not drift apart:
+#   - build_repeater_firmwares()          the legacy build.sh path (local builds, `build-firmwares`)
+#   - get-repeater-firmwares-to-build     the matrix CI added in 1.17, consumed by
+#                                         .github/workflows/firmware-builder.yml
+#
+# Mainline builds EVERY *_repeater env. This fork must not. The forward filters are
+# censorship-capable, and only two boards are hardware-tested — shipping the full ~89-board matrix
+# would put untested fork firmware on hardware nobody here can verify, and would contradict the
+# target list stated in docs/ and in the release notes.
+#
+# History: the 1.17 merge rerouted release CI from build_repeater_firmwares() to the matrix builder.
+# The function was untouched and looked fine, but nothing called it any more, and the tag for
+# fwdfilter8 built 89 boards / 177 assets before this was caught in the draft. Keep both callers
+# pointed at this array. Widening it is a deliberate act, not a merge artifact.
+FORK_REPEATER_TARGETS=(
+  "RAK_4631_repeater"         # hardware-tested
+  "Heltec_v3_repeater"        # hardware-tested
+  "SenseCap_Solar_repeater"   # build-validated only: nRF52840+SX1262, RAK4631-class, no P1 on hand
+)
+
 build_repeater_firmwares() {
-
-#  # build specific repeater firmwares
-#  build_firmware "Heltec_v2_repeater"
-#  build_firmware "Heltec_v3_repeater"
-#  build_firmware "Xiao_C3_Repeater_sx1262"
-#  build_firmware "Xiao_S3_WIO_Repeater"
-#  build_firmware "LilyGo_T3S3_sx1262_Repeater"
-#  build_firmware "RAK_4631_Repeater"
-
-  # fwdfilter fork: ship the HW-tested boards (RAK4631 + Heltec V3) plus build-validated
-  # nRF52840+SX1262 targets of the same class. The filter code itself is board-agnostic, so
-  # these compile cleanly; boards we don't own are build-validated only (noted below).
-  build_firmware "RAK_4631_repeater"
-  build_firmware "Heltec_v3_repeater"
-  # SenseCap Solar Node P1 (nRF52840 + SX1262, RAK4631-class). Build-validated 2026-06-21:
-  # Flash 54.1%, RAM 13.0%, emits firmware.zip for BLE-DFU. NOT HW-tested (no P1 on hand).
-  build_firmware "SenseCap_Solar_repeater"
-
+  for env in "${FORK_REPEATER_TARGETS[@]}"; do
+    build_firmware "$env"
+  done
 }
 
 build_companion_firmwares() {
@@ -288,7 +295,8 @@ elif [[ $1 == "get-companion-firmwares-to-build" ]]; then
   get_pio_envs_ending_with_string "_companion_radio_usb"
   get_pio_envs_ending_with_string "_companion_radio_ble"
 elif [[ $1 == "get-repeater-firmwares-to-build" ]]; then
-  get_pio_envs_ending_with_string "_repeater"
+  # fork-scoped, NOT get_pio_envs_ending_with_string "_repeater" -- see FORK_REPEATER_TARGETS
+  printf '%s\n' "${FORK_REPEATER_TARGETS[@]}"
 elif [[ $1 == "get-room-server-firmwares-to-build" ]]; then
   get_pio_envs_ending_with_string "_room_server"
 fi
