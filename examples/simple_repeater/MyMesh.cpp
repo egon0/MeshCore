@@ -1550,9 +1550,15 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
     } else if (memcmp(config, "fwd.scoped.reserve", 18) == 0) {   // dedicated getter (set/get symmetry)
       sprintf(reply, "> %d", (int)_fwd_prefs.scoped_reserve_pct);
     } else if (memcmp(config, "fwd.scoped.stats", 16) == 0) {
-      sprintf(reply, "> reserve=%d%% fwd_scoped=%lu fwd_unscoped=%lu drop_unscoped=%lu saved_air=%lums",
+      // budget= is the gate's actual input: the duty-cycle token bucket, remaining/max in ms.
+      // It refills at the configured duty cycle and is capped at max, so on any node transmitting
+      // less than its duty-cycle limit it sits pinned at max and the reserve can never engage
+      // below 100%. Reporting it makes that observable instead of something you have to derive.
+      unsigned long max_budget = (unsigned long)(getDutyCycleWindowMs() / (1.0f + getAirtimeBudgetFactor()));
+      sprintf(reply, "> reserve=%d%% fwd_scoped=%lu fwd_unscoped=%lu drop_unscoped=%lu saved_air=%lums budget=%lu/%lums",
               (int)_fwd_prefs.scoped_reserve_pct, (unsigned long)n_fwd_scoped, (unsigned long)n_fwd_unscoped,
-              (unsigned long)n_drop_unscoped, (unsigned long)airtime_saved_unscoped);
+              (unsigned long)n_drop_unscoped, (unsigned long)airtime_saved_unscoped,
+              (unsigned long)getRemainingTxBudget(), max_budget);
     } else {
       return false;   // not a fwd 'get' -> let CommonCLI handle it
     }
