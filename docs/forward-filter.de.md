@@ -11,11 +11,11 @@ Dokument beschreibt, *was das Gerät kann*.
 
 ## Das Wichtigste zuerst
 
-**Alle Filter sind ab Werk ausgeschaltet.** Eine frisch geflashte Node verhält sich exakt wie ein
+**Alle Filter sind ab Werk ausgeschaltet.** Ein frisch geflashter Knoten verhält sich exakt wie ein
 Standard-MeshCore-1.17.0-Repeater. Es passiert nichts, solange du nicht selbst etwas einschaltest.
 
 Die Filter greifen ausschließlich **lokal auf diesem einen Knoten** — es gibt keine Protokolländerung,
-keine Absprache mit anderen Nodes. Ein Netz aus gemischter Firmware ist unproblematisch, ein einzelner
+keine Absprache mit anderen Knoten. Ein Netz aus gemischter Firmware ist unproblematisch, ein einzelner
 gefilterter Knoten in einem sonst unveränderten Netz genauso.
 
 Bedient wird alles über die **Admin-CLI**: lokal per USB oder aus der Ferne über Funk
@@ -121,7 +121,7 @@ set fwd.block.add <64-stelliger-hex-pubkey> both     # beides
 **`prune`** verwirft Flood-Kopien, deren Pfad über den genannten Knoten gelaufen ist. Der Test läuft
 **vor** der Duplikat-Unterdrückung — eine Kopie desselben Pakets, die über einen anderen Pfad
 eintrifft, kann also noch gewinnen. Damit steuert man Pfade, statt Pakete zu vernichten: „nimm nicht
-den Weg über X, nimm den anderen". Zuverlässig ist das nur bei Mehrbyte-Hashgrößen, weil der Pfad-Hop
+den Weg über X, nimm den anderen“. Zuverlässig ist das nur bei Mehrbyte-Hashgrößen, weil der Pfad-Hop
 sonst mehrdeutig ist.
 
 **`advert`** unterbindet die Weiterleitung von Adverts, die dieser Knoten selbst ausgesendet hat. Hier
@@ -154,7 +154,7 @@ set fwd.whitelist.0hop allow|drop                 # Standard: allow
 ```
 
 `0hop` betrifft Floods, die noch keinen Hop hinter sich haben, also direkt vom Absender kommen. Da es
-hier keinen „letzten Hop" gibt, den man prüfen könnte, braucht es eine eigene Regel. Standard ist
+hier keinen „letzten Hop“ gibt, den man prüfen könnte, braucht es eine eigene Regel. Standard ist
 `allow`, damit direkt gehörte Knoten weiterhin durchkommen.
 
 **Damit du dich nicht selbst aussperrst**, sind drei Paketarten grundsätzlich von der Whitelist
@@ -193,12 +193,13 @@ Fenster so viel gesendet hat, dass der Rest für ein weiteres unscoped Paket nic
 
 > **Warum nicht das Duty-Cycle-Budget selbst?** Weil sich damit nichts messen lässt. Der Token-Bucket
 > im Dispatcher läuft über eine ganze Stunde und hat bei legalen 10 % rund 360 000 ms Spielraum. Ein
-> Flood-Sturm aus zwanzig Weiterleitungen kostet ~10 000 ms und verschwindet darin spurlos. Auf der
-> Bench gemessen: Bucket bei 359 325/360 000 ms (99,8 % voll), während der Knoten ein belebtes Netz
-> weitergeleitet hat — bei 0,995 % tatsächlichem Duty Cycle gegen ein 10-%-Limit. Eine Prozentschwelle
-> auf einen dauerhaft vollen Bucket kann nur bei 100 % auslösen. Bis einschließlich `fwdfilter7` war
-> die Einstellung deshalb faktisch ein Schalter: 0 = aus, 100 = alle unscoped Floods verwerfen, alles
-> dazwischen wirkungslos. Das kurze Fenster ist der eigentliche Fix — nicht ein anderer Schwellwert.
+> Flood-Sturm aus zwanzig Weiterleitungen kostet ~10 000 ms und verschwindet darin spurlos. Auf dem
+> Prüfstand gemessen: Bucket bei 359 325/360 000 ms (99,8 % voll), während der Knoten den Verkehr
+> eines belebten Netzes weitergeleitet hat — bei 0,995 % tatsächlichem Duty Cycle und einem Limit von
+> 10 %. Eine prozentuale Schwelle über einem dauerhaft vollen Bucket kann nur bei 100 % auslösen. Bis
+> einschließlich `fwdfilter7` war die Einstellung deshalb faktisch ein Schalter: 0 = aus, 100 = alle
+> unscoped Floods verwerfen, alles dazwischen wirkungslos. Das kurze Fenster ist der eigentliche Fix
+> — nicht ein anderer Schwellwert.
 
 Freigehalten wird ausschließlich das **Sendebudget dieses Knotens**, nicht der Funkkanal.
 
@@ -235,10 +236,10 @@ get fwd.scoped.stats
 
 - `fwd_scoped` / `fwd_unscoped` — weitergeleitete Floods, nach Scope getrennt
 - `drop_unscoped` — von der Reserve verworfene Floods
-- `saved_air` — dadurch eingespartes Airtime in Millisekunden
+- `saved_air` — dadurch eingesparte Airtime in Millisekunden
 - `air` — im laufenden Fenster verbrauchte Sende-Airtime / Zuteilung / Fensterlänge. Das ist die
-  Eingangsgröße des Gates: liegt der erste Wert weit unter dem zweiten, greift die Reserve nicht, und
-  zwar unabhängig davon, was eingestellt ist
+  Größe, auf die die Reserve schaut: liegt der erste Wert weit unter dem zweiten, greift sie nicht,
+  ganz gleich was eingestellt ist
 
 Die Zähler zählen die **Weiterleitungs-Entscheidung**, nicht das bestätigte Senden. Sie liegen im RAM
 und **werden bei jedem Neustart auf 0 gesetzt** — das ist Absicht, ein Zähler pro Paket im Flash würde
@@ -270,33 +271,33 @@ engeren Sinn, werden aber im selben `/fwd_prefs` gespeichert und über dieselbe 
 
 ## Typische Konfigurationen
 
-**„Ich will erst mal nur beobachten."**
+**„Ich will erst mal nur beobachten.“**
 Nichts tun. Der Auslieferungszustand filtert nicht. Regelmäßig `get fwd.scoped.stats` abfragen liefert
 dir schon ohne aktiven Filter die Aufteilung scoped/unscoped an deinem Standort.
 
-**„Die 1-Byte-Adverts sollen aufhören."**
+**„Die 1-Byte-Adverts sollen aufhören.“**
 ```
 set fwd.hashfilter advert
 ```
 Der übliche erste Schritt. Wirkt nur auf Adverts, Nutzdaten bleiben unangetastet.
 
-**„Ein bestimmter Knoten flutet mich zu."**
+**„Ein bestimmter Knoten flutet mich zu.“**
 ```
 set fwd.block.add <pubkey> both
 get fwd.block
 ```
 
-**„Der Weg über Knoten X ist schlecht, ich will den anderen Pfad."**
+**„Der Weg über Knoten X ist schlecht, ich will den anderen Pfad.“**
 ```
 set fwd.block.add <pubkey-von-X> prune
 ```
 Kein Datenverlust — Kopien über andere Pfade gewinnen weiterhin.
 
-**„Mein Backbone-Knoten soll nur noch für den Backbone relayen."**
+**„Mein Backbone-Knoten soll nur noch für den Backbone relayen.“**
 Siehe [Sichere Inbetriebnahme](#sichere-inbetriebnahme) — das ist der Fall, bei dem die Reihenfolge
 zählt.
 
-**„Unscoped Traffic frisst mein Airtime."**
+**„Unscoped Traffic frisst meine Airtime.“**
 ```
 set fwd.scoped.reserve 40
 ```
@@ -364,7 +365,7 @@ Praktische Folgen:
 - **Wechsel zwischen Fork und Mainline-Firmware** verliert nur die Filterkonfiguration. Funk-, Regions-
   und Identitätseinstellungen bleiben erhalten.
 - **Ältere Firmware liest neuere `/fwd_prefs`** und ignoriert unbekannte Felder. Fehlt ein Feld, gilt
-  der Standardwert — also „aus".
+  der Standardwert — also „aus“.
 - **Beim Update von fwdfilter3 auf fwdfilter4 oder neuer** wird die Filterkonfiguration einmalig auf
   Standardwerte zurückgesetzt (Umstellung von `/com_prefs` auf `/fwd_prefs`). Whitelist- und
   Blacklist-Einträge danach neu setzen. Funk- und Regionseinstellungen bleiben erhalten. Zwischen
@@ -372,7 +373,7 @@ Praktische Folgen:
 - **Beim Update auf fwdfilter8** wandern die *Mainline*-Einstellungen einmalig von `/com_prefs` nach
   `/prefs.json`. Die Filterkonfiguration ist davon nicht betroffen, ein Rückschritt auf ältere Firmware
   hat aber Folgen — siehe
-  [Downgrade nach fwdfilter8](./flashing-repeater.de.md#downgrade-nach-fwdfilter8).
+  [Downgrade nach einem Update auf fwdfilter8](./flashing-repeater.de.md#downgrade-nach-einem-update-auf-fwdfilter8).
 
 ---
 
@@ -387,7 +388,7 @@ Praktische Folgen:
 | `fwdfilter5` | 2026-06-21 | Neues Build-Ziel SenseCAP Solar Node P1 (keine Funktionsänderung) |
 | `fwdfilter6` | 2026-07-10 | Stufe 4 (`fwd.scoped.reserve`) + `get fwd.scoped.stats` |
 | `fwdfilter7` | 2026-07-13 | Fix: Airtime-Schätzung gegen Fehlercodes abgesichert · Version mit führendem `v` |
-| `fwdfilter8` | 2026-08-10 | Basis auf MeshCore 1.17.0 · Fix: Stufe 4 misst über ein 60-s-Fenster statt über den Stundenbucket (1–99 war zuvor wirkungslos) · Fix: Rauschgrund-Schätzer klemmte auf −120 fest · Fix: abgesicherte Airtime-Schätzung brach laufende Sendungen ab |
+| `fwdfilter8` | 2026-08-10 | Basis auf MeshCore 1.17.0 · Fix: Stufe 4 misst über ein 60-s-Fenster statt über den Stundenbucket (1–99 war zuvor wirkungslos) · Fix: Schätzung des Grundrauschens klemmte auf −120 fest · Fix: abgesicherte Airtime-Schätzung brach laufende Sendungen ab |
 
 **Empfehlung: immer die neueste Version.** Alle älteren enthalten mindestens einen der oben
 behobenen Fehler.

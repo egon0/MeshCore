@@ -8,7 +8,7 @@ Funk (OTA).
 
 Der **[MeshCore-Webflasher](https://flasher.meshcore.io)** ist der empfohlene Weg, so wie bei der
 offiziellen Firmware auch. In der Geräteliste steht er nicht — diese Firmware wird nicht über den
-Flasher *verteilt* — aber er kann sie flashen: über den Eintrag **„Custom Firmware"** ganz unten in der
+Flasher *verteilt* — aber er kann sie flashen: über den Eintrag **„Custom Firmware“** ganz unten in der
 Geräteliste lädst du die Datei aus den
 [Releases dieses Forks](https://github.com/ACETyr/MeshCore/releases) direkt von deinem Rechner.
 
@@ -42,9 +42,10 @@ Bei Heltec V3 hängt alles an dieser einen Unterscheidung:
 > ersetzt nur die Anwendung; Name, Passwort, Funk- und Regionseinstellungen sowie die Identität bleiben
 > erhalten. Dieselbe Datei wird auch für OTA verwendet.
 
-> ℹ️ **SenseCAP Solar Node P1** ist bisher nur **build-validiert, nicht auf echter Hardware getestet**
-> — es stand kein Gerät zur Verfügung. Der Filter-Code ist boardunabhängig und übersetzt sauber, aber
-> behandle diese Binaries als ungeprüft. Rückmeldungen von P1-Betreibern sind ausdrücklich willkommen.
+> ℹ️ Beim **SenseCAP Solar Node P1** ist bisher nur geprüft, dass er sich **fehlerfrei bauen lässt —
+> auf echter Hardware getestet ist er nicht**, es stand kein Gerät zur Verfügung. Der Filter-Code ist
+> boardunabhängig und übersetzt sauber, aber behandle diese Binaries als ungeprüft. Rückmeldungen von
+> P1-Betreibern sind ausdrücklich willkommen.
 
 ---
 
@@ -57,12 +58,12 @@ Browser: **Chrome oder Edge**. Firefox und Safari können kein WebSerial und fun
 1. <https://flasher.meshcore.io> öffnen.
    *(Der Flasher der österreichischen Community unter <https://flasher.meshcore-austria.at> ist ein Fork
    davon und verhält sich identisch — beide funktionieren.)*
-2. In der Geräteliste **nicht** dein Board auswählen, sondern ganz unten **„Custom Firmware"**
+2. In der Geräteliste **nicht** dein Board auswählen, sondern ganz unten **„Custom Firmware“**
    anklicken und die heruntergeladene Datei aus Schritt 1 auswählen. Der Flasher erkennt am Dateityp
    selbst, worum es sich handelt: `.zip` → nRF52, `.bin` → ESP32.
 3. Gerät per USB anstecken.
 4. **Nur bei RAK4631 / SenseCAP P1:** das Gerät in den DFU-Modus bringen — entweder mit der Schaltfläche
-   **„Enter DFU mode"** im Flasher, oder von Hand durch **zweimaliges kurzes Drücken der Reset-Taste**.
+   **„Enter DFU mode“** im Flasher, oder von Hand durch **zweimaliges kurzes Drücken der Reset-Taste**.
 5. Flashen starten, seriellen Port auswählen, warten.
 
 Wählst du eine `-merged.bin`, zeigt der Flasher eine Warnung, dass der Flash gelöscht wird — das ist
@@ -155,7 +156,7 @@ get fwd.hashfilter
 > off prob=100
 ```
 
-Antwortet die Node hier mit einem Fehler statt mit dem Status, läuft Mainline-Firmware ohne
+Antwortet der Knoten hier mit einem Fehler statt mit dem Status, läuft Mainline-Firmware ohne
 Forward-Filter.
 
 ---
@@ -176,7 +177,7 @@ set dutycycle <wert>      # 1-100, in Prozent
 > technische Vorgabe der Mainline-Firmware und keine Aussage darüber, was du senden darfst.
 
 Welcher Wert korrekt ist, hängt vom Band, vom Kanal und von der Rechtslage an deinem Standort ab. Das
-zu kennen und einzuhalten **liegt allein beim Betreiber der Node** — diese Firmware wird
+zu kennen und einzuhalten **liegt allein beim Betreiber des Knotens** — diese Firmware wird
 international verteilt und kann dir keine Zahl nennen. Frage im Zweifel deine nationale
 Regulierungsbehörde oder den zuständigen Amateurfunkverband.
 
@@ -198,7 +199,7 @@ Drei Wege, alle gleichwertig — die Forward-Filter-Befehle funktionieren auf je
 
 **Per USB, im Browser.** <https://config.meshcore.io> in Chrome oder Edge öffnen, Gerät per USB
 verbinden, seriellen Port auswählen. Bequemster Weg für die Erstkonfiguration. (Der Webflasher hat
-unter „Serial console" dieselbe Funktion eingebaut.)
+unter „Serial console“ dieselbe Funktion eingebaut.)
 
 **Über Funk, aus der MeshCore-App.** Repeater als Admin hinzufügen (Remote Management), dann den
 Command-Line-Tab benutzen. Das ist der Weg für Knoten im Feld — und der Grund, warum die Whitelist
@@ -231,7 +232,7 @@ Zwei Ausnahmen:
 
 ---
 
-## Downgrade nach fwdfilter8
+## Downgrade nach einem Update auf fwdfilter8
 
 `fwdfilter8` setzt auf MeshCore 1.17 auf, und 1.17 hat das Format der Einstellungsdatei gewechselt:
 statt des alten Blobs `/com_prefs` wird jetzt `/prefs.json` geschrieben.
@@ -251,7 +252,7 @@ Einstellungen wandern automatisch mit, es ist nichts zu tun.
 Die Filterkonfiguration in `/fwd_prefs` ist davon **nicht** betroffen: sie liegt in einer eigenen
 Datei und übersteht den Wechsel in beide Richtungen.
 
-Wenn du einen Downgrade planst, notiere dir vorher den Stand — `get radio`, `get name`,
+Wenn du ein Downgrade planst, notiere dir vorher den Stand — `get radio`, `get name`,
 `get dutycycle` und was du sonst verstellt hast — und setze ihn danach neu.
 
 ---
@@ -274,7 +275,7 @@ fwdfilter-Version, ist die alte Konfiguration wieder da.
 |---|---|
 | Browser sieht das Gerät nicht | WebSerial gibt es nur in Chrome und Edge, nicht in Firefox oder Safari |
 | Webflasher nimmt die Datei nicht an | Der Dateiauswahldialog akzeptiert nur `.zip` und `.bin`. Für nRF52 die `.zip` nehmen, nicht die `.uf2` |
-| RAK4631: Flasher meldet einen DFU-Fehler | Gerät war nicht im DFU-Modus. „Enter DFU mode" im Flasher benutzen oder zweimal Reset drücken |
+| RAK4631: Flasher meldet einen DFU-Fehler | Gerät war nicht im DFU-Modus. „Enter DFU mode“ im Flasher benutzen oder zweimal Reset drücken |
 | Kein USB-Laufwerk nach Doppel-Reset | Zwei getrennte Klicks statt Doppelklick; anderes USB-Kabel (viele sind reine Ladekabel) |
 | esptool findet den Port nicht | USB-Treiber (CP210x/CH340) fehlt; unter Linux fehlt die Berechtigung — Benutzer in Gruppe `dialout` |
 | Heltec startet nach dem Flash nicht mehr | Vermutlich die nicht-`merged` `.bin` an Adresse `0x0` geschrieben. Die `-merged.bin` an `0x0` nachflashen |
