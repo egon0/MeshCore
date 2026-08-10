@@ -11,6 +11,47 @@ Fork-original work (the forward filter, `/fwd_prefs`, the airtime guard) is not 
 
 ## Active
 
+### meshcore-dev/MeshCore#3137 — `fem_rxgain` bound to the wrong field
+
+| | |
+|---|---|
+| Upstream author | agessaman |
+| Upstream PR | https://github.com/meshcore-dev/MeshCore/pull/3137 (OPEN) |
+| Files | `src/helpers/CommonCLI.h` (one line) · `test/test_node_prefs_fem/` (fork-original) |
+| Related | upstream issue #3145 |
+
+**What it fixes.** `NodePrefs::RadioPrefs::structure()` bound both JSON keys to the same member:
+
+```cpp
+def("rxgain",     _parent->rx_boosted_gain);
+def("fem_rxgain", _parent->rx_boosted_gain);   // should be radio_fem_rxgain
+```
+
+so `radio_fem_rxgain` was never serialised and `set radio.fem.rxgain` did not survive a reboot, even
+though the CLI handler does call `savePrefs()`. `rx_boosted_gain` is the SX1262's own boosted-RX
+register; `radio_fem_rxgain` is the external FEM LNA — two different settings. The one-line fix is
+agessaman's, from #3137.
+
+**Why carried.** It is reachable from this fork's source. We publish binaries only for RAK4631,
+Heltec V3 and SenseCAP P1 — none of which can control a FEM LNA — but `[env:heltec_v4_repeater]` is
+present in the tree and **builds from this branch** (verified 2026-08-10), and
+`HeltecV4Board::canControlLoRaFemLna()` returns true on a V4.3. Anyone compiling this fork for a
+Heltec V4 gets the forward filter and, without this patch, the upstream #3145 behaviour with no way
+to persist the workaround.
+
+**The test is ours, the fix is not.** `test/test_node_prefs_fem/test_node_prefs_fem.cpp` is
+fork-original: it drives the real `NodePrefs` and asserts both keys round-trip independently with
+opposite values, so an aliasing binding cannot pass by coincidence. Verified 2026-08-10 — 2/2 fail on
+`dev` @ `f6c25e6a` and on this branch before the fix, 2/2 pass with it, and 2/2 pass against #3137 @
+`c58c9b2f` with that PR's full native suite green. Both the verification and a separate observation
+about `examples/companion_radio/NodePrefs.h` were posted to #3137 on 2026-08-10.
+
+**Removal condition.** Drop the `CommonCLI.h` line when mainline merges #3137 or an equivalent fix —
+the replant should dedupe it to identical text. **Keep the test**; it must still pass afterwards, and
+it is the check that tells us the fix actually arrived with the replant.
+
+---
+
 ### meshcore-dev/MeshCore#2933 — median noise-floor estimator
 
 | | |
