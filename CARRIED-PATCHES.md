@@ -17,7 +17,7 @@ Fork-original work (the forward filter, `/fwd_prefs`, the airtime guard) is not 
 |---|---|
 | Upstream author | usrflo |
 | Upstream PR | https://github.com/meshcore-dev/MeshCore/pull/2933 (OPEN) |
-| Applied as | `a028adcb`, carried through the 1.17 replant |
+| Applied as | `a028adcb` (median only), **refreshed to PR head `fa6557f8` in the 1.17.1 replant** |
 | Files | `src/helpers/radiolib/RadioLibWrappers.{h,cpp}` |
 | Fork issue | ACETyr/MeshCore#3 |
 
@@ -33,8 +33,29 @@ which recovers in both directions.
 
 **Why carried rather than waited out.** Reproduced on our own hardware and verified fixed: 250
 zero-hop adverts at 0.4 s wedges a stock node at -120 in 18.9 s; the patched build under identical
-stimulus holds -104 with 56 blocks in 199 s, 15 up / 14 down. Mainline 1.17 and current `dev` both
-still ship the ratchet.
+stimulus holds -104 with 56 blocks in 199 s, 15 up / 14 down. Mainline 1.17, 1.17.1 and current `dev`
+all still ship the ratchet.
+
+**Refreshed to `fa6557f8` in the 1.17.1 replant (2026-08-16).** The PR gained three things after
+`a028adcb` was taken, and all three matter enough that carrying the older revision was the worse
+option: 50 ms sample spacing (a block spans a real ~3.2 s window instead of a few ms), a one-sided
+15 dB hold, and a bound on that hold. Measured on the bench the same day, control `34ad059a` vs
+`fa6557f8`, matched stimulus:
+
+- what we carried before published the *busy-channel* level under load (-56 on 2026-08-10) — with the
+  spacing and hold it stays at the idle floor instead;
+- 43 published values in a full run, every one -105, no -120 anywhere, while the control hit the
+  clamp 8 s into the load;
+- the bound releases a genuinely persistent rise: `held 1/3` → `2/3` → `noise_floor = -37 (accepted
+  after 3 held blocks)`, then falls back to -105 by itself once the channel clears.
+
+Applied surgically, not by taking the PR's files wholesale — those would have reverted this fork's
+own airtime-fallback work (`_airtime_full_ms`, `AIRTIME_ANCHOR_MIN_BYTES`) which lives in the same
+two files. `loop()` is now byte-identical to `fa6557f8` apart from one added comment. Posted to the
+PR as `pull/2933#issuecomment-5309823975`.
+
+⚠️ **This is an unmerged PR that moved twice in six days.** Re-diff against the PR head at every
+replant rather than assuming the carried copy is current — that is exactly how it went stale here.
 
 **Removal condition.** Drop this patch when mainline merges a fix for the ratchet, then re-verify on
 the bench rig before release. Two competing PRs are open and neither has a maintainer review:
