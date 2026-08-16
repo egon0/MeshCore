@@ -203,6 +203,14 @@ Fenster so viel gesendet hat, dass der Rest für ein weiteres unscoped Paket nic
 
 Freigehalten wird ausschließlich das **Sendebudget dieses Knotens**, nicht der Funkkanal.
 
+> **Seit Mainline 1.17.1 gehen weniger Antworten unscoped hinaus.** Kann ein Server den Scope einer
+> Anfrage nicht auflösen — etwa bei einer Direct-Anfrage, die keinen Transportcode mitbringt —, sendet
+> er die Antwort seit 1.17.1 auf seinem eigenen Standard-Scope statt unscoped. Vorher ging sie unscoped
+> hinaus und war damit auf jedem Repeater mit gesetzter Reserve ein Kandidat fürs Verwerfen. Login- und
+> Admin-Antworten trifft die Reserve dadurch seltener. Darauf verlassen sollte man sich nicht: es wirkt
+> nur, wenn der *antwortende* Knoten bereits auf 1.17.1 läuft und eine Standard-Region gesetzt hat —
+> ältere Knoten und solche ohne Standard-Region antworten weiterhin unscoped.
+
 ### Gemessenes Verhalten
 
 Zwei Durchläufe mit identischer Last (je 93 Flood-Adverts, `dutycycle 10`, also 6000 ms Zuteilung je

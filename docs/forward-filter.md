@@ -198,6 +198,14 @@ within the current window that the remainder no longer covers another unscoped p
 
 Only this node's **transmit budget** is reserved, not the RF channel.
 
+> **Since mainline 1.17.1 fewer replies go out un-scoped.** When a server cannot resolve the scope of
+> a request — a DIRECT request carrying no transport code, for instance — 1.17.1 sends the reply on
+> the server's own default scope instead of un-scoped. Before that it went out un-scoped, which made
+> it a candidate for dropping on every repeater with a reserve set. The reserve therefore hits login
+> and admin replies less often. Do not rely on it: it only applies when the *replying* node already
+> runs 1.17.1 and has a default region configured — older nodes, and nodes without one, still reply
+> un-scoped.
+
 ### Measured behaviour
 
 Two runs under identical load (93 flood adverts each, `dutycycle 10`, so a 6000 ms allowance per
