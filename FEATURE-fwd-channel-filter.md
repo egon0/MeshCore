@@ -184,6 +184,13 @@ entries also happens once, in the CLI handler — the forwarding path never hash
   correction to an earlier assumption: it is *not* `SHA256(name)` over 32 bytes as in
   `TransportKeyStore.cpp:44` (that is the *region* path); group channels truncate to 16.
 - Whether `chan_label` earns its 128 bytes, or whether printing the hash byte is enough.
-- Whether the top hashes measured network-wide (`0xD9`, `0x11`, `0xE2`) are also the top ones at KK and
-  Hofstetten. The netwide mix is not necessarily the local mix, and this feature should be justified
-  per site before it ships.
+
+**Not open: whether the netwide mix matches KK's.** This firmware is published for the wider MeshCore
+community, and for that audience the netwide measurement *is* the relevant basis — our own two nodes
+are two operators among many. A site whose local mix differs simply leaves `chan_count = 0` and pays
+nothing, which is the same opt-in shape as every other stage. The feature does not need to earn its
+place at KK to earn its place in the release.
+
+What a site-local measurement is still good for is *tuning* — which channel a given operator should
+block — and that belongs in the docs as a recipe (`corescope_channel_profile.py` against their own
+observer), not as a gate on shipping.
