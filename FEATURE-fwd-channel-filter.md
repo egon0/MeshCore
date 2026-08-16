@@ -73,26 +73,32 @@ silently never matches.
 **The residual is the collision, measured directly.** All 39 non-matching packets on `0xD9` parse
 correctly (their MAC equals `decoded_json.mac`) but belong to some other channel.
 
-Sweeping an 87-name candidate list (`corescope_channel_profile.py --identify`) named **33 % of group
-flood airtime** and showed how badly the collision rate varies with how busy the target channel is:
+Sweeping a candidate list (`corescope_channel_profile.py --identify`) named **37 % of group flood
+airtime** and showed how badly the collision rate varies with how busy the target channel is:
 
-| hash | channel | share of that hash byte that really is this channel |
-|---|---|---|
-| `0xD9` | `#test` | 96 % |
-| `0x11` | `Public` (mainline default PSK) | 96 % |
-| `0xFB` | `#austria` | 96 % |
-| `0xDD` | `#vienna` | 79 % |
-| `0x1C` | `#at` | 56 % |
-| **`0x87`** | **`#wien`** | **47 %** |
-| **`0xB8`** | **`#chat`** | **38 %** |
+| hash | channel | share of group airtime | share of that hash byte that really is this channel |
+|---|---|---|---|
+| `0xD9` | `#test` | 14.4 % | 96 % |
+| `0x11` | `Public` (mainline default PSK) | 11.4 % | 96 % |
+| `0xFB` | `#austria` | 4.3 % | 96 % |
+| `0x28` | `#ping` | 3.1 % | 92 % |
+| `0xDD` | `#vienna` | 1.9 % | 79 % |
+| `0x62` | `#wetter` | 0.7 % | 87 % |
+| `0x1C` | `#at` | 0.0 % | 56 % |
+| **`0x87`** | **`#wien`** | 0.1 % | **47 %** |
+| **`0xB8`** | **`#chat`** | 0.0 % | **38 %** |
+
+Names are case- and prefix-exact — the key is `SHA256` of the literal string, so `#ping` matches while
+`ping`, `#Ping` and `#PING` all match nothing.
 
 For a busy channel a hash-only filter is ~96 % accurate. For `#wien` or `#chat` **the majority of
 traffic on that byte belongs to someone else** — such a filter would drop more foreign traffic than
 target traffic. There is no way to tell the two cases apart without the key, which is the whole
 argument for this design.
 
-Incidentally this identifies the busiest channels on the AT network: `#test` (14.4 % of group
-airtime), the default `Public` channel (11.4 %) and `#austria` (4.3 %).
+Incidentally this identifies the busiest channels on the AT network: `#test`, the default `Public`
+channel, `#austria` and `#ping` — **four channels are a third of all group airtime**, which is what
+makes a blocklist of only 8 entries a sensible size.
 
 ## Design (proposal)
 
