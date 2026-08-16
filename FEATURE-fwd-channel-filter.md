@@ -1,8 +1,9 @@
 # FEATURE — Stage 5: key-based channel blocklist (`fwd.chan.block`)
 
 **Status: SPEC ONLY — nothing implemented.** Written 2026-08-17 off the CoreScope measurement below.
-Target: fwdfilter10 at the earliest, on top of `repeater-v1.17.1.fwdfilter9`. Needs one open question
-answered (§ Open) before code.
+Target: fwdfilter10 at the earliest, on top of `repeater-v1.17.1.fwdfilter9`. The key derivation that
+blocked this spec is now **verified end to end against live traffic** (§ Key derivation); no known
+blocker remains, only the site-local justification question in § Open.
 
 ## Problem
 
@@ -30,6 +31,52 @@ hash (`SHA256(secret)[0]`, `BaseChatMesh.cpp:887`). Matching on that byte alone 
 **244 of 256 possible hash values were occupied** in the window, median 8 packets each. Blocking a
 hash would almost certainly also block unrelated channels that collide on that byte, and there is no
 larger hash available — the protocol transmits one byte, full stop.
+
+## Key derivation — VERIFIED end to end (2026-08-17)
+
+Three separate facts, each checked in source and then confirmed against live traffic.
+
+**1. The firmware has no name→key derivation at all.** `BaseChatMesh::addChannel(name, psk_base64)`
+(`BaseChatMesh.cpp:880`) base64-decodes a PSK into a zeroed 32-byte buffer and accepts only length 16
+or 32. The name is a label and nothing else. **The `#name` convention lives in the client**, so the
+repeater must implement the client convention itself — there is no firmware function to reuse.
+
+**2. The client convention** (`meshcore/commands/device.py:215`, the canonical implementation):
+
+```python
+channel_secret = sha256(channel_name.encode("utf-8")).digest()[0:16]   # name INCLUDES the '#'
+```
+
+So `#name` channels are always **128-bit**, zero-padded into the 32-byte buffer. That makes the
+short-key path the normal case, not an edge case.
+
+**3. The two hashes are taken over different lengths — this is the trap.**
+
+| quantity | input | note |
+|---|---|---|
+| channel secret | `SHA256("#name")[0:16]` | 16 bytes, buffer zero-filled to 32 |
+| `hash[0]` on the wire | `SHA256(secret[0:16])[0]` | over **16** bytes (`setChannel` picks 16 vs 32 by testing whether bytes 16..31 are zero, `BaseChatMesh.cpp:908`) |
+| MAC | `HMAC-SHA256(key = secret[0:32])` over the ciphertext, first 2 bytes | over **32** bytes — `MACThenDecrypt` always passes `PUB_KEY_SIZE` (`Utils.cpp:155/163`) |
+
+Hash over 16, HMAC over 32, from the same buffer. Getting either length wrong yields a filter that
+silently never matches.
+
+**Confirmed against 6000 live GRP_TXT packets** — derived the key, then MAC-verified only (no
+`decrypt()` call anywhere in the check):
+
+| channel | `hash[0]` | packets on that byte | MAC-confirmed |
+|---|---|---|---|
+| `Public` (default PSK `izOH6cXN6mrJ5e26oRXNcg==`) | `0x11` | 740 | 711 (96.1 %) |
+| `#test` | `0xD9` | 1064 | 1025 (96.3 %) |
+| `#austria` | `0xFB` | 371 | 361 (97.3 %) |
+
+**The residual is the collision, measured directly.** All 39 non-matching packets on `0xD9` parse
+correctly (their MAC equals `decoded_json.mac`) but belong to some other channel: **3.7 % of the
+traffic carrying that hash byte is not the channel you think it is.** That is exactly the collateral a
+hash-only blocklist would cause, and the number that justifies doing this with the key instead.
+
+Incidentally this identifies the two busiest channels on the AT network: the default `Public` channel
+and `#test`.
 
 ## Design (proposal)
 
@@ -114,10 +161,9 @@ entries also happens once, in the CLI handler — the forwarding path never hash
 - **CPU on the forwarding path.** One HMAC-SHA256 per configured channel whose hash byte matched.
   Bounded by step 3 and by `FWD_CHAN_MAX`. nRF52840 has CC310 hardware crypto, already used under
   `USE_CC310_HW_CRYPTO`; Heltec V3 does it in software. Needs measuring, not assuming.
-- **128-bit channels.** `GroupChannel::secret` is a 32-byte buffer but keys exist in 128- and 256-bit
-  form (`BaseChatMesh.cpp:908/910`), while `MACThenDecrypt` always feeds `PUB_KEY_SIZE` bytes to the
-  HMAC. Stage 5 must mirror mainline's buffer handling byte for byte rather than reimplement it, or
-  short-key channels will silently never match.
+- **128-bit channels are the normal case, not an edge case** — every `#name` channel is 16 bytes,
+  zero-padded to 32. Resolved above: hash over 16 bytes, HMAC over 32. Mirror mainline's buffer
+  handling rather than reimplementing it.
 
 ## Test plan (bench, mirroring the fwdfilter3/4 validation)
 
@@ -134,12 +180,9 @@ entries also happens once, in the CLI handler — the forwarding path never hash
 
 ## Open
 
-- **Exact key derivation for `#name` group channels is NOT yet verified.** `TransportKeyStore.cpp:44`
-  derives *region* keys as `SHA256(name)`, and the meshcore Python client derives auto channel keys
-  from the name too, but the firmware path for group channels has not been read end to end. Getting
-  this wrong means `set fwd.chan.block #atchat` silently never matches. **Verify against the companion
-  firmware and confirm on the bench before writing the CLI handler** — do not infer it from the region
-  code.
+- ~~Exact key derivation for `#name` group channels~~ — **RESOLVED 2026-08-17**, see above. Note the
+  correction to an earlier assumption: it is *not* `SHA256(name)` over 32 bytes as in
+  `TransportKeyStore.cpp:44` (that is the *region* path); group channels truncate to 16.
 - Whether `chan_label` earns its 128 bytes, or whether printing the hash byte is enough.
 - Whether the top hashes measured network-wide (`0xD9`, `0x11`, `0xE2`) are also the top ones at KK and
   Hofstetten. The netwide mix is not necessarily the local mix, and this feature should be justified
