@@ -71,12 +71,28 @@ silently never matches.
 | `#austria` | `0xFB` | 371 | 361 (97.3 %) |
 
 **The residual is the collision, measured directly.** All 39 non-matching packets on `0xD9` parse
-correctly (their MAC equals `decoded_json.mac`) but belong to some other channel: **3.7 % of the
-traffic carrying that hash byte is not the channel you think it is.** That is exactly the collateral a
-hash-only blocklist would cause, and the number that justifies doing this with the key instead.
+correctly (their MAC equals `decoded_json.mac`) but belong to some other channel.
 
-Incidentally this identifies the two busiest channels on the AT network: the default `Public` channel
-and `#test`.
+Sweeping an 87-name candidate list (`corescope_channel_profile.py --identify`) named **33 % of group
+flood airtime** and showed how badly the collision rate varies with how busy the target channel is:
+
+| hash | channel | share of that hash byte that really is this channel |
+|---|---|---|
+| `0xD9` | `#test` | 96 % |
+| `0x11` | `Public` (mainline default PSK) | 96 % |
+| `0xFB` | `#austria` | 96 % |
+| `0xDD` | `#vienna` | 79 % |
+| `0x1C` | `#at` | 56 % |
+| **`0x87`** | **`#wien`** | **47 %** |
+| **`0xB8`** | **`#chat`** | **38 %** |
+
+For a busy channel a hash-only filter is ~96 % accurate. For `#wien` or `#chat` **the majority of
+traffic on that byte belongs to someone else** — such a filter would drop more foreign traffic than
+target traffic. There is no way to tell the two cases apart without the key, which is the whole
+argument for this design.
+
+Incidentally this identifies the busiest channels on the AT network: `#test` (14.4 % of group
+airtime), the default `Public` channel (11.4 %) and `#austria` (4.3 %).
 
 ## Design (proposal)
 
@@ -192,5 +208,16 @@ nothing, which is the same opt-in shape as every other stage. The feature does n
 place at KK to earn its place in the release.
 
 What a site-local measurement is still good for is *tuning* — which channel a given operator should
-block — and that belongs in the docs as a recipe (`corescope_channel_profile.py` against their own
-observer), not as a gate on shipping.
+block — and that belongs in the docs as a recipe, not as a gate on shipping.
+
+### Naming a hash the operator has not configured
+
+`get fwd.chan.block` can only print labels for channels the operator entered; the wire hash itself is
+not reversible. But it does not have to be: `corescope_channel_profile.py --identify` derives the key
+from each candidate name and **MAC-verifies it against real packets**, which is certainty rather than
+a 1-in-256 byte guess — the same mechanism the filter uses. An 87-name list already names a third of
+group airtime, and an operator who knows their local channel names will do much better.
+
+This belongs in the German docs alongside the CLI, or the operator sees `0xD9` and has no way to know
+what they would be blocking. Deliberately a **host-side** tool: the repeater needs none of it, and the
+question is asked once, when deciding what to block.
