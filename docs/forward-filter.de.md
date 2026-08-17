@@ -39,8 +39,8 @@ Bedient wird alles über die **Admin-CLI**: lokal per USB oder aus der Ferne üb
 | `set fwd.whitelist.del` | `<hex-Präfix>` | — | Einträge mit passendem Präfix entfernen |
 | `set fwd.whitelist.clear` | — | — | Whitelist leeren |
 | `set fwd.scoped.reserve` | `0`–`100` | `0` | Prozent der Airtime-Zuteilung (60-s-Fenster) für Scoped-Traffic freihalten |
-| `set fwd.chan.block` | `#name` · `<32\|64-hex>` `[Label]` | — | Kanal in die Blockliste aufnehmen (max. 16) |
-| `set fwd.chan.unblock` | `#name` · `<32\|64-hex>` · `<Index>` | — | Einen Eintrag entfernen |
+| `set fwd.chan.block` | `#name` · `Public` · `<32\|64-hex>` `[Label]` | — | Kanal in die Blockliste aufnehmen (max. 16) |
+| `set fwd.chan.unblock` | `#name` · `Public` · `<32\|64-hex>` · `<Index>` | — | Einen Eintrag entfernen |
 | `set fwd.chan.clear` | — | — | Blockliste leeren |
 | `set flood.max.request` | `0`–`64` | `64` | Hop-Limit für geflutete REQUEST-Pakete |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop-Limit für geflutete ANON_REQUEST-Pakete |
@@ -266,6 +266,7 @@ Reboot sieht dann einfach wie ein Zähler-Reset aus.
 
 ```
 set fwd.chan.block #austria       # Kanal über seinen Namen sperren
+set fwd.chan.block Public         # der eingebaute Standardkanal
 set fwd.chan.block <32|64-hex>    # Kanal über seinen Schlüssel sperren
 set fwd.chan.unblock #austria     # rückgängig — auch über Index oder Schlüssel
 set fwd.chan.clear                # Blockliste leeren
@@ -337,12 +338,19 @@ Der Knoten leitet den Schlüssel aus dem Namen ab, genau wie die Clients es tun.
 **buchstabengetreu** genommen: `#ping` trifft, `ping`, `#Ping` und `#PING` treffen nichts. Das 
 gehört dazu.
 
-**Über den Schlüssel** — für Kanäle mit eigenem PSK, 32 oder 64 Hex-Zeichen, mit optionaler
-Beschriftung:
+**Der Standardkanal** heißt schlicht `Public`. Er hat keinen `#…`-Namen, sondern einen festen
+Schlüssel; dafür gibt es den eingebauten Namen, damit niemand ihn abtippen muss:
 
 ```
-set fwd.chan.block 8b3387e9c5cdea6ac9e5edbaa115cd72 Public
+set fwd.chan.block Public
 > OK (hash 11)
+```
+
+**Über den Schlüssel** — für alles Übrige, 32 oder 64 Hex-Zeichen, mit optionaler Beschriftung:
+
+```
+set fwd.chan.block 4f2b… MeinKanal
+> OK (hash 7A)
 ```
 
 **Anzeigen.** Die Liste zeigt nur die Hash-Bytes, damit sie auch bei voller Tabelle vollständig über
@@ -416,15 +424,23 @@ leer, entfällt die Prüfung vollständig.
 
 **Ein Repeater speichert keine Kanalschlüssel — außer denen, die du selbst einträgst.** Ein
 Standard-Repeater ist keinem Kanal beigetreten und hält keinen einzigen. Erst `set fwd.chan.block`
-legt einen Schlüssel in `/fwd_prefs` ab, und zwar genau den, den du angegeben hast.
+legt einen Schlüssel in `/fwd_prefs` ab.
+
+Und zwar den **vollständigen** Schlüssel — auch bei der Eingabe über `#name`, wo der Knoten ihn sich
+aus dem Namen selbst ausrechnet. Einen halben Schlüssel gibt es nicht: derselbe Schlüssel, der den MAC
+prüft, entschlüsselt auch (`Utils::MACThenDecrypt` reicht ihn an beide Schritte weiter). Wer
+verifizieren kann, kann grundsätzlich mitlesen — dass *diese* Firmware es nicht tut, ist eine
+Eigenschaft des Codes, keine des Schlüssels.
+
+Die Frage ist deshalb nie, *ob* ein ganzer Schlüssel auf dem Gerät liegt, sondern **ob dieser
+Schlüssel ein Geheimnis ist.**
 
 Bei den beiden üblichen Fällen ist das folgenlos:
 
 - **`#name`-Kanäle** — der Schlüssel ist der Hash des Namens. Jeder, der den Namen kennt, kann ihn
   ausrechnen. Der Knoten trägt nichts, was ein Angreifer nicht ohnehin hätte.
-- **Der `Public`-Kanal** — dafür ist die Eingabe als Hex-Schlüssel überhaupt gedacht: er hat keinen
-  Namen der Form `#…`, sondern einen festen PSK, der im Quelltext der Firmware und in
-  [der FAQ](./faq.md) steht. Ebenfalls kein Geheimnis.
+- **Der `Public`-Kanal** — sein PSK steht im Quelltext der Firmware und in [der FAQ](./faq.md), und
+  jedes Companion-Gerät im Netz bringt ihn mit. Ebenfalls kein Geheimnis.
 
 Nur wenn du den PSK eines **wirklich privaten** Kanals einträgst, liegt danach ein echtes Geheimnis
 auf dem Gerät — und ein Gerät auf einem Mast lässt sich abbauen und auslesen. Der Schlüssel wäre

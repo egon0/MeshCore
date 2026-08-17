@@ -38,8 +38,8 @@ management in the MeshCore app, admin login required). See
 | `set fwd.whitelist.del` | `<hex prefix>` | — | Remove all entries matching the prefix |
 | `set fwd.whitelist.clear` | — | — | Empty the whitelist |
 | `set fwd.scoped.reserve` | `0`–`100` | `0` | Percent of the airtime allowance (60 s window) kept free for scoped traffic |
-| `set fwd.chan.block` | `#name` · `<32\|64-hex>` `[label]` | — | Add a channel to the blocklist (max. 16) |
-| `set fwd.chan.unblock` | `#name` · `<32\|64-hex>` · `<index>` | — | Remove one entry |
+| `set fwd.chan.block` | `#name` · `Public` · `<32\|64-hex>` `[label]` | — | Add a channel to the blocklist (max. 16) |
+| `set fwd.chan.unblock` | `#name` · `Public` · `<32\|64-hex>` · `<index>` | — | Remove one entry |
 | `set fwd.chan.clear` | — | — | Empty the blocklist |
 | `set flood.max.request` | `0`–`64` | `64` | Hop cap for flooded REQUEST packets |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop cap for flooded ANON_REQUEST packets |
@@ -261,6 +261,7 @@ like a counter reset.
 
 ```
 set fwd.chan.block #austria       # block a channel by its name
+set fwd.chan.block Public         # the built-in default channel
 set fwd.chan.block <32|64-hex>    # block a channel by its key
 set fwd.chan.unblock #austria     # undo -- also by index or by key
 set fwd.chan.clear                # empty the blocklist
@@ -329,11 +330,19 @@ set fwd.chan.block #austria
 The node derives the key from the name exactly as the clients do. The name is taken **literally**:
 `#ping` matches, while `ping`, `#Ping` and `#PING` match nothing. The `#` is part of it.
 
-**By key** — for channels with their own PSK, 32 or 64 hex characters, with an optional label:
+**The default channel** is simply called `Public`. It has no `#…` name, it has a fixed key, and the
+built-in name is there so that nobody has to type that key out:
 
 ```
-set fwd.chan.block 8b3387e9c5cdea6ac9e5edbaa115cd72 Public
+set fwd.chan.block Public
 > OK (hash 11)
+```
+
+**By key** — for everything else, 32 or 64 hex characters, with an optional label:
+
+```
+set fwd.chan.block 4f2b… MyChannel
+> OK (hash 7A)
 ```
 
 **Viewing.** The list shows hash bytes only, so that a full table still fits in one reply over the
@@ -404,16 +413,22 @@ check does not run at all.
 ### What the node stores
 
 **A repeater holds no channel keys — other than the ones you enter yourself.** A stock repeater has
-joined no channel and holds none. Only `set fwd.chan.block` puts a key into `/fwd_prefs`, and it is
-exactly the key you gave it.
+joined no channel and holds none. Only `set fwd.chan.block` puts a key into `/fwd_prefs`.
+
+And it is the **whole** key, including when you enter a `#name` and the node derives it for itself.
+There is no half key to store: the same key that verifies the MAC also decrypts
+(`Utils::MACThenDecrypt` hands it to both steps). Anyone who can verify can in principle read — the
+fact that *this* firmware does not is a property of the code, not of the key.
+
+So the question is never *whether* a whole key sits on the device, but **whether that key is a
+secret.**
 
 In the two ordinary cases that has no consequence:
 
 - **`#name` channels** — the key is the hash of the name. Anyone who knows the name can derive it, so
   the node carries nothing an attacker did not already have.
-- **The `Public` channel** — which is what the hex form is really for: `Public` has no `#name`, it
-  has a fixed PSK that is published in the firmware source and in [the FAQ](./faq.md). Also no
-  secret.
+- **The `Public` channel** — its PSK is published in the firmware source and in
+  [the FAQ](./faq.md), and every companion in the mesh ships with it. Also no secret.
 
 Only if you enter the PSK of a **genuinely private** channel does a real secret end up on the device
 — and a device on a mast can be taken down and read out. That key is the same one the channel can be

@@ -76,6 +76,17 @@ TEST_F(ChanFilter, DerivationMatchesLiveTraffic) {
   EXPECT_EQ(padding_ok, 0) << "a name-derived channel key is 16 bytes, zero-padded to 32";
 }
 
+// The built-in alias for the default channel is a hardcoded key. A typo in it would produce a
+// filter that silently never matches, so the wire hash is pinned to the value seen on air.
+TEST_F(ChanFilter, PublicAliasKeyIsRight) {
+  static const uint8_t pub[16] = FWD_CHAN_PUBLIC_PSK;
+  uint8_t secret[32];
+  memset(secret, 0, sizeof(secret));
+  memcpy(secret, pub, sizeof(pub));
+  EXPECT_EQ(wire_hash(secret), 0x11) << "the Public channel hashes to 0x11 on air";
+  EXPECT_NE(wire_hash(secret), hash_a) << "and it is not the same channel as " << CHAN_A;
+}
+
 // The premise of the whole feature: one byte is not enough to tell channels apart.
 TEST_F(ChanFilter, TheTwoChannelsReallyCollide) {
   EXPECT_EQ(hash_a, hash_b) << "these names no longer collide -- pick a new one with "

@@ -30,6 +30,14 @@
 #define FWD_CHAN_MAX          16
 #define FWD_CHAN_LABEL_LEN    16   // display only; "" for a raw-key entry
 
+// MeshCore's built-in default group channel. It has no `#name` to derive from, so without this
+// constant an operator would have to paste a hex string for the single most common channel there is.
+// No secret: the same 16 bytes are in examples/companion_radio/MyMesh.cpp (PUBLIC_GROUP_PSK, as
+// base64) and in docs/faq.md, and every companion in the mesh ships with them.
+#define FWD_CHAN_PUBLIC_NAME  "Public"
+#define FWD_CHAN_PUBLIC_PSK   { 0x8B, 0x33, 0x87, 0xE9, 0xC5, 0xCD, 0xEA, 0x6A, \
+                                0xC9, 0xE5, 0xED, 0xBA, 0xA1, 0x15, 0xCD, 0x72 }
+
 namespace mesh {
 
 // GRP_TXT / GRP_DATA payload layout, per Mesh.cpp:227 --

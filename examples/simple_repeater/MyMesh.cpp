@@ -1588,6 +1588,12 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
         mesh::deriveChannelKey(buf, key);       // public hashtag channel: key is SHA256 of the name
         if (!label) label = buf;                // remember what was blocked, for `get`
         ok = true;
+      } else if (strcmp(buf, FWD_CHAN_PUBLIC_NAME) == 0 || strcmp(buf, "public") == 0) {
+        // Convenience alias for the built-in default channel, which has no '#name' to derive from.
+        static const uint8_t pub[16] = FWD_CHAN_PUBLIC_PSK;
+        memcpy(key, pub, sizeof(pub));
+        if (!label) label = FWD_CHAN_PUBLIC_NAME;
+        ok = true;
       } else if (hexlen == 32 || hexlen == 64) {
         ok = mesh::Utils::fromHex(key, hexlen / 2, buf);   // raw PSK: 128-bit or 256-bit
       } else {
@@ -1619,8 +1625,12 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       int by_index = -1;
       if (arg[0] == '#') {
         mesh::deriveChannelKey(arg, key);
+      } else if (strcmp(arg, FWD_CHAN_PUBLIC_NAME) == 0 || strcmp(arg, "public") == 0) {
+        static const uint8_t pub[16] = FWD_CHAN_PUBLIC_PSK;   // same alias as fwd.chan.block
+        memset(key, 0, sizeof(key));
+        memcpy(key, pub, sizeof(pub));
       } else if (arg[0] >= '0' && arg[0] <= '9' && strlen(arg) <= 2) {
-        by_index = atoi(arg);                    // also accept the index shown by `get fwd.chan.block`
+        by_index = atoi(arg);                    // also accept the index shown by `get fwd.chan`
       } else {
         int hexlen = strlen(arg);
         memset(key, 0, sizeof(key));
