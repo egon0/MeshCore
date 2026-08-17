@@ -144,8 +144,8 @@ int Utils::encryptThenMAC(const uint8_t* shared_secret, uint8_t* dest, const uin
   return CIPHER_MAC_SIZE + enc_len;
 }
 
-int Utils::MACThenDecrypt(const uint8_t* shared_secret, uint8_t* dest, const uint8_t* src, int src_len) {
-  if (src_len <= CIPHER_MAC_SIZE) return 0;  // invalid src bytes
+bool Utils::MACMatches(const uint8_t* shared_secret, const uint8_t* src, int src_len) {
+  if (src_len <= CIPHER_MAC_SIZE) return false;  // invalid src bytes
 
   uint8_t hmac[CIPHER_MAC_SIZE];
 #ifdef USE_CC310_HW_CRYPTO
@@ -165,10 +165,12 @@ int Utils::MACThenDecrypt(const uint8_t* shared_secret, uint8_t* dest, const uin
     sha.finalizeHMAC(shared_secret, PUB_KEY_SIZE, hmac, CIPHER_MAC_SIZE);
   }
 #endif
-  if (memcmp(hmac, src, CIPHER_MAC_SIZE) == 0) {
-    return decrypt(shared_secret, dest, src + CIPHER_MAC_SIZE, src_len - CIPHER_MAC_SIZE);
-  }
-  return 0; // invalid HMAC
+  return memcmp(hmac, src, CIPHER_MAC_SIZE) == 0;
+}
+
+int Utils::MACThenDecrypt(const uint8_t* shared_secret, uint8_t* dest, const uint8_t* src, int src_len) {
+  if (!MACMatches(shared_secret, src, src_len)) return 0;  // invalid src bytes, or invalid HMAC
+  return decrypt(shared_secret, dest, src + CIPHER_MAC_SIZE, src_len - CIPHER_MAC_SIZE);
 }
 
 static const char hex_chars[] = "0123456789ABCDEF";

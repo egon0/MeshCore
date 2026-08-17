@@ -55,6 +55,16 @@ public:
   static int MACThenDecrypt(const uint8_t* shared_secret, uint8_t* dest, const uint8_t* src, int src_len);
 
   /**
+   * \brief  checks the MAC (in leading bytes of 'src') and STOPS -- never decrypts.
+   *
+   * The first half of MACThenDecrypt(), split out so a forwarding node can recognise which
+   * channel a packet belongs to without being able to read it. There is deliberately no
+   * decrypt() call on this path; that is the property the channel blocklist rests on.
+   * \returns  true if the MAC is valid for this secret
+  */
+  static bool MACMatches(const uint8_t* shared_secret, const uint8_t* src, int src_len);
+
+  /**
    * \brief  converts 'src' bytes with given length to Hex representation, and null terminates.
   */
   static void toHex(char* dest, const uint8_t* src, size_t len);

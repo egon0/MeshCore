@@ -207,6 +207,35 @@ entries also happens once, in the CLI handler — the forwarding path never hash
   zero-padded to 32. Resolved above: hash over 16 bytes, HMAC over 32. Mirror mainline's buffer
   handling rather than reimplementing it.
 
+## Pre-flight — DONE 2026-08-17, before any of the plumbing below
+
+The crypto claim is settled off the bench, in CI. `Utils::MACMatches()` is the first half of
+`MACThenDecrypt()` split out (that function now calls it, so there is exactly one MAC implementation
+and the filter cannot drift from the receive path). `test/test_chan_filter/`, in the new
+`native_chan_filter` environment, **constructs its own packets** from two public hashtag names that
+collide on the wire hash byte — `#test` and `#bench89`, both `0xD9`. A channel key is `SHA256` of a
+public string, so nothing in the test carries information about anybody, and **no captured traffic is
+stored in this repository**.
+
+Separately, and on demand rather than in CI, `reference/chan_filter_vectors.py` checks the same
+derivation against live traffic and keeps every packet in memory. Run 2026-08-17: wire hash `0xD9`
+carried **2130 packets in 24 h — 2048 `#test` and 82 belonging to other channels**. `#test`'s key
+MAC-verifies all 2048 and rejects all 82, with zero false matches in either direction. A hash-only
+filter drops all 2130. That is the collateral the design exists to avoid, measured rather than
+argued — and it is a measurement to repeat, not a dataset to carry.
+
+⚠️ Two traps found by doing this first, both of which would have wasted the implementation:
+- **The native test environment mocks SHA256, and its `finalizeHMAC()` writes nothing.** Any HMAC
+  assertion under `[env:native]` can only ever report "no match" — a suite of negative-only vectors
+  would have passed and proved nothing. Hence the separate `native_chan_filter` environment, built
+  against the real `rweather/Crypto`. This is also why the suite asserts it contains vectors of
+  *both* polarities.
+- **`${platformio.libdeps_dir}` expands to a mangled path on this box**, silently falling back to
+  the mock include. Verified with `pio project metadata --json-output`, not by reading the ini.
+
+Fault injection, each reverted afterwards: gate forced to always-match, forced to never-match, and
+HMAC computed over the wrong byte range — all three break the suite. 10/10 green again after restore.
+
 ## Test plan (bench, mirroring the fwdfilter3/4 validation)
 
 1. CLI: set/get/unblock round-trip, both `#name` and raw-hex forms, clamp at `FWD_CHAN_MAX`.
@@ -214,11 +243,13 @@ entries also happens once, in the CLI handler — the forwarding path never hash
 3. Zero-cost when off: `chan_count = 0` → forwarding counters identical to fwdfilter9 under load.
 4. **Positive:** companion joins `#benchtest`, sends group messages; repeater with that channel blocked
    drops them, `get fwd.chan.stats` climbs, other traffic unaffected.
-5. **Negative control — the test that justifies the whole design.** Construct a second channel whose
-   key hashes to the *same* first byte (brute-force a name until `SHA256(SHA256(name))[0]` collides),
-   block only the first, and prove the second is **still forwarded**. A hash-only filter fails this
-   test by construction. Without it we have not shown the crypto buys anything.
-6. Airtime: measure `saved_air` against the drop count and the SF8 airtime model.
+5. ✅ **Negative control — done in CI, see above.** For the bench, repeat it live with the colliding
+   name the generator produces: `#bench89` derives to the same wire hash `0xD9` as `#test`
+   (`SHA256(SHA256("#name")[0:16])[0]` — note the `#` and the 16-byte truncation; an earlier draft
+   of this line wrote `SHA256(SHA256(name))[0]`, which is neither).
+6. Airtime: measure `saved_air` against the drop count and the corrected SF8 airtime model.
+7. **CPU on the forwarding path** — one HMAC-SHA256 per hash-byte match. Measure on **both** a RAK4631
+   (CC310 hardware) and a Heltec V3 (software); this is the only risk left that the bench must answer.
 
 ## Open
 
