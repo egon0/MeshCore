@@ -3,7 +3,7 @@
 *🇬🇧 [English version](./forward-filter.md) · 📻 [Flash-Anleitung](./flashing-repeater.de.md)*
 
 Dieses Handbuch beschreibt **alle** Forward-Filter-Funktionen der ACETyr-Repeater-Firmware
-(`repeater-v1.17.0.fwdfilterN`) an einer Stelle. Es ersetzt die über die einzelnen Releases verteilten
+(`repeater-v1.17.1.fwdfilterN`) an einer Stelle. Es ersetzt die über die einzelnen Releases verteilten
 Beschreibungen — die Release-Notes dokumentieren ab jetzt nur noch, *was sich geändert hat*, dieses
 Dokument beschreibt, *was das Gerät kann*.
 
@@ -12,7 +12,7 @@ Dokument beschreibt, *was das Gerät kann*.
 ## Das Wichtigste zuerst
 
 **Alle Filter sind ab Werk ausgeschaltet.** Ein frisch geflashter Knoten verhält sich exakt wie ein
-Standard-MeshCore-1.17.0-Repeater. Es passiert nichts, solange du nicht selbst etwas einschaltest.
+Standard-MeshCore-1.17.1-Repeater. Es passiert nichts, solange du nicht selbst etwas einschaltest.
 
 Die Filter greifen ausschließlich **lokal auf diesem einen Knoten** — es gibt keine Protokolländerung,
 keine Absprache mit anderen Knoten. Ein Netz aus gemischter Firmware ist unproblematisch, ein einzelner
@@ -39,6 +39,9 @@ Bedient wird alles über die **Admin-CLI**: lokal per USB oder aus der Ferne üb
 | `set fwd.whitelist.del` | `<hex-Präfix>` | — | Einträge mit passendem Präfix entfernen |
 | `set fwd.whitelist.clear` | — | — | Whitelist leeren |
 | `set fwd.scoped.reserve` | `0`–`100` | `0` | Prozent der Airtime-Zuteilung (60-s-Fenster) für Scoped-Traffic freihalten |
+| `set fwd.chan.block` | `#name` · `<32\|64-hex>` `[Label]` | — | Kanal in die Blockliste aufnehmen (max. 16) |
+| `set fwd.chan.unblock` | `#name` · `<32\|64-hex>` · `<Index>` | — | Einen Eintrag entfernen |
+| `set fwd.chan.clear` | — | — | Blockliste leeren |
 | `set flood.max.request` | `0`–`64` | `64` | Hop-Limit für geflutete REQUEST-Pakete |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop-Limit für geflutete ANON_REQUEST-Pakete |
 | `set flood.max.response` | `0`–`64` | `64` | Hop-Limit für geflutete RESPONSE-Pakete |
@@ -53,6 +56,9 @@ Zu jedem `set` gibt es ein passendes `get`:
 | `get fwd.whitelist` | `> on 0hop=allow 3 entries \| a1b2c3d4e5f6 \| …` |
 | `get fwd.scoped.reserve` | `> 40` |
 | `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s` |
+| `get fwd.chan` | `> 3 entries \| 2F B2 9C` |
+| `get fwd.chan <Index>` | `> 1: #slovakia (B2)` |
+| `get fwd.chan.stats` | `> blocked=1832 saved_air=856000ms` |
 | `get flood.max.request` | `> 64` |
 
 In den Listenausgaben steht pro Eintrag nur das **6-Byte-Präfix** des Pubkey; bei `get fwd.block`
@@ -256,6 +262,159 @@ Reboot sieht dann einfach wie ein Zähler-Reset aus.
 
 ---
 
+## Stufe 5 — Kanal-Blockliste
+
+```
+set fwd.chan.block #austria       # Kanal über seinen Namen sperren
+set fwd.chan.block <32|64-hex>    # Kanal über seinen Schlüssel sperren
+set fwd.chan.unblock #austria     # rückgängig — auch über Index oder Schlüssel
+set fwd.chan.clear                # Blockliste leeren
+```
+
+Verwirft geflutete **Gruppennachrichten** (`GRP_TXT`, `GRP_DATA`), die zu einem der eingetragenen
+Kanäle gehören. Alles andere bleibt unberührt: Direktnachrichten, Adverts, Anfragen, und
+Gruppennachrichten aller nicht eingetragenen Kanäle.
+
+Gruppenverkehr ist netzweit gemessen **21 % der Flood-Airtime** — der zweitgrößte Posten nach den
+Adverts. Ein Teil davon sind Kanäle, für die es am eigenen Standort keinen einzigen Empfänger gibt.
+
+### Warum nicht einfach über das Hash-Byte
+
+Ein Gruppenpaket trägt seinen Kanal nur als **ein einziges Byte** mit sich, den gekürzten Hash des
+Kanalschlüssels. In einer 24-Stunden-Messung über das gesamte Netz waren davon **244 von 256 Werten
+belegt**. Wer auf dieses Byte filtert, trifft zwangsläufig fremde Kanäle mit, und das Protokoll bietet
+nichts Längeres an.
+
+Wie stark, hängt vom Byte ab und ist nicht vorhersehbar. Gemessen:
+
+| Byte | gehört wirklich zum gesuchten Kanal |
+|---|---|
+| `0xD9` (`#test`) | 96 % |
+| `0xDD` (`#vienna`) | 77 % |
+| `0xB3` (`#hamradio`) | 43 % |
+| `0x98` (`#yo`) | 1 % |
+
+Bei `#yo` würde ein Filter auf das Hash-Byte **99 % fremden Verkehr** verwerfen und 1 % Zielverkehr.
+Ohne den Schlüssel lassen sich die beiden Fälle nicht auseinanderhalten — genau deshalb arbeitet diese
+Stufe anders.
+
+### Der Knoten erkennt den Kanal, ohne ihn lesen zu können
+
+Statt das Hash-Byte zu vergleichen, hinterlegst du den **Kanalschlüssel**. Jedes Gruppenpaket führt
+einen 2 Byte langen Authentifizierungscode (MAC) mit sich, der unter genau diesem Schlüssel über den
+verschlüsselten Text gebildet wurde. Stimmt er, gehört das Paket zu diesem Kanal — nicht
+wahrscheinlich, sondern nachweislich.
+
+Der Filter prüft diesen Code **und hört dann auf**. Er entschlüsselt nichts. Im Empfangspfad der
+Firmware folgt auf dieselbe Prüfung ein `decrypt()`; auf dem Filterpfad steht dieser Aufruf nicht, und
+zwar nachprüfbar im Quelltext (`src/helpers/ChannelFilter.h`). Ein Repeater kann damit benennen,
+welchen Kanal er verwirft, und trotzdem keine einzige Nachricht mitlesen.
+
+Auf dem Prüfstand gegen echten Funkverkehr belegt: auf dem Byte `0xD9` lagen in 24 Stunden 2130
+Pakete, davon 2048 aus `#test` und 82 aus anderen Kanälen. Der eingetragene `#test`-Schlüssel hat alle
+2048 erkannt und alle 82 durchgelassen. Ein Filter auf das Hash-Byte hätte alle 2130 verworfen.
+
+### Kanäle eintragen
+
+**Über den Namen** — für die öffentlichen Hashtag-Kanäle, die die Apps anbieten:
+
+```
+set fwd.chan.block #austria
+> OK (hash FB)
+```
+
+Der Knoten leitet den Schlüssel aus dem Namen ab, genau wie die Clients es tun. Der Name wird
+**buchstabengetreu** genommen: `#ping` trifft, `ping`, `#Ping` und `#PING` treffen nichts. Das 
+gehört dazu.
+
+**Über den Schlüssel** — für Kanäle mit eigenem PSK, 32 oder 64 Hex-Zeichen, mit optionaler
+Beschriftung:
+
+```
+set fwd.chan.block 8b3387e9c5cdea6ac9e5edbaa115cd72 Public
+> OK (hash 11)
+```
+
+**Anzeigen.** Die Liste zeigt nur die Hash-Bytes, damit sie auch bei voller Tabelle vollständig über
+Funk passt; Einzelheiten holst du dir pro Eintrag:
+
+```
+get fwd.chan
+> 3 entries | 2F B2 9C
+
+get fwd.chan 1
+> 1: #slovakia (B2)
+```
+
+**Entfernen** geht über Namen, Schlüssel oder Index:
+
+```
+set fwd.chan.unblock 1
+> OK (1 removed)
+```
+
+### Was steckt hinter einem Hash-Byte?
+
+Diese Frage lässt sich auf dem Knoten nicht beantworten — ein Hash ist nicht umkehrbar, und der Knoten
+kennt nur die Kanäle, die du selbst eingetragen hast. Sie muss auch nur einmal beantwortet werden,
+nämlich bevor du entscheidest, was du sperrst.
+
+Am eigenen Standort weißt du in aller Regel, welche Kanäle laufen: Namen eintragen, `get fwd.chan`
+lesen, fertig. Wo das nicht reicht, geht es am Rechner: Kandidatennamen sammeln, aus jedem den
+Schlüssel ableiten und ihn gegen echte Pakete per MAC prüfen. Das ist Gewissheit statt Raten unter 256
+Möglichkeiten — dasselbe Verfahren, das der Filter selbst benutzt. Ein fertiges Werkzeug dafür liegt
+im Projekt unter `reference/corescope_channel_profile.py --identify`.
+
+### Der überzeugendste Fall: Kanäle ohne Empfänger vor Ort
+
+An einem österreichischen Standort gemessen, 24 Stunden: der Repeater leitete Verkehr aus **zehn
+Kanälen** weiter, für die es dort keinen Empfänger gibt — `#hungary`, `#slovakia`, `#kosice`,
+`#switzerland`, `#polska`, `#turiec`, `#poland`, `#yo`, `#australia` und `#slovenia`, zusammen
+**4,8 % der Gruppen-Airtime**.
+
+Das ist der unstrittige Teil: dieser Verkehr erreicht über diesen Knoten niemanden. Ein belebter
+*lokaler* Kanal ist etwas anderes — ihn zu sperren ist eine Betreiberentscheidung, die andere Nutzer
+desselben Repeaters trifft. Die Firmware nimmt sie dir nicht ab und trifft von sich aus keine.
+
+### Wirkung kontrollieren
+
+```
+get fwd.chan.stats
+> blocked=1832 saved_air=856000ms
+```
+
+- `blocked` — verworfene Gruppenpakete
+- `saved_air` — die dadurch eingesparte Airtime in Millisekunden
+
+Wie die anderen Zähler liegen beide im RAM und **stehen nach einem Neustart wieder auf 0**.
+
+### Rechenaufwand
+
+Die Prüfung kostet Rechenzeit, aber nur für Pakete, deren Hash-Byte überhaupt zu einem Eintrag passt —
+alle anderen sind nach einem Byte-Vergleich erledigt. Gemessen, ein Treffer:
+
+| | pro Prüfung |
+|---|---|
+| RAK4631 (nRF52840, Krypto-Hardware) | **210 µs** |
+| Heltec V3 (ESP32-S3, Software) | **482 µs** |
+
+Gegen die rund 470 ms, die dasselbe Paket auf dem Funk belegt, sind das **0,1 %**. Ist die Blockliste
+leer, entfällt die Prüfung vollständig.
+
+### Schlüssel auf einem Mast
+
+Ein Repeater, der Kanalschlüssel gespeichert hat, ist ein anderes Objekt als einer ohne. Bei den
+öffentlichen `#hashtag`-Kanälen ist das belanglos: deren Schlüssel ist der Hash des Namens, jeder kann
+ihn selbst ausrechnen, der Knoten trägt also nichts, was ein Angreifer nicht ohnehin hätte.
+
+Bei einem privaten Kanal mit eigenem PSK sieht es anders aus. Ein Gerät auf einem Mast lässt sich
+abbauen und auslesen, und der Schlüssel darin öffnet den Kanal für alle Zukunft. **Empfehlung: diese
+Stufe für öffentliche Kanäle verwenden.** Die Eingabe eines rohen Schlüssels ist möglich, aber sie ist
+der Ausnahmefall und sollte eine bewusste Entscheidung über ein konkretes Gerät an einem konkreten Ort
+sein.
+
+---
+
 ## Hop-Limits für geflutete Pakete
 
 ```
@@ -311,6 +470,16 @@ set fwd.scoped.reserve 40
 ```
 Nach ein paar Stunden `get fwd.scoped.stats` prüfen und den Wert nachziehen. 100 verwirft unscoped
 Floods, sobald überhaupt Budgetdruck herrscht.
+
+**„Ich leite Kanäle weiter, die hier niemand hört.“**
+```
+set fwd.chan.block #hungary
+set fwd.chan.block #polska
+get fwd.chan
+```
+Der unstrittige Fall. Vorher aufschreiben, welche Kanäle an deinem Standort tatsächlich gelesen
+werden — der Rest ist die Kandidatenliste. Nach einem Tag `get fwd.chan.stats` prüfen: bleibt
+`blocked` bei 0, war der Kanal hier ohnehin nicht unterwegs, und der Eintrag kann wieder weg.
 
 ---
 
@@ -397,6 +566,8 @@ Praktische Folgen:
 | `fwdfilter6` | 2026-07-10 | Stufe 4 (`fwd.scoped.reserve`) + `get fwd.scoped.stats` |
 | `fwdfilter7` | 2026-07-13 | Fix: Airtime-Schätzung gegen Fehlercodes abgesichert · Version mit führendem `v` |
 | `fwdfilter8` | 2026-08-10 | Basis auf MeshCore 1.17.0 · Fix: Stufe 4 misst über ein 60-s-Fenster statt über den Stundenbucket (1–99 war zuvor wirkungslos) · Fix: Schätzung des Grundrauschens klemmte auf −120 fest · Fix: abgesicherte Airtime-Schätzung brach laufende Sendungen ab |
+| `fwdfilter9` | 2026-08-16 | Basis auf MeshCore 1.17.1 · mitgetragene Korrektur der Grundrauschen-Schätzung auf den aktuellen Stand gebracht (keine Änderung an den `fwd.*`-Kommandos) |
+| `fwdfilter10` | offen | Stufe 5 (`fwd.chan.block`) + `get fwd.chan` / `get fwd.chan.stats` |
 
 **Empfehlung: immer die neueste Version.** Alle älteren enthalten mindestens einen der oben
 behobenen Fehler.
@@ -405,8 +576,8 @@ behobenen Fehler.
 
 ## Grenzen und offene Punkte
 
-- **Je 16 Einträge** in Whitelist und Policy-Tabelle. Das reicht für Backbone-Nachbarschaften, nicht
-  für netzweite Listen.
+- **Je 16 Einträge** in Whitelist, Policy-Tabelle und Kanal-Blockliste. Das reicht für
+  Backbone-Nachbarschaften und für die Kanäle einer Region, nicht für netzweite Listen.
 - **Listenausgaben werden gekürzt.** `get fwd.whitelist`/`get fwd.block` zeigen bei voller Tabelle
   nicht alle Einträge an. Die Einträge sind trotzdem aktiv.
 - **Statistikzähler sind flüchtig** (siehe Stufe 4) und zählen die Weiterleitungs-Entscheidung, nicht
@@ -418,6 +589,15 @@ behobenen Fehler.
   bekommt die volle Zuteilung — die Reserve dämpft anhaltende Last, nicht jede einzelne Spitze.
 - **Die Lastmessung oben wurde mit Flood-Adverts gefahren.** Bei gemischtem Realverkehr — größere
   Nutzlasten, andere Airtime pro Paket — ist das Verhalten hergeleitet, nicht gemessen.
+- **Die Kanal-Blockliste wirkt nur auf geflutete Gruppenpakete.** Gruppenverkehr, der als Direktpaket
+  läuft, geht durch. In der Messung waren das 3 von 13 820 Paketen; die Ausnahme kostet also praktisch
+  nichts und hält den Eingriff eng.
+- **Ein Kanal, dessen Schlüssel du nicht hast, lässt sich nicht gezielt sperren.** Das ist kein
+  Versehen, sondern der Punkt: ohne Schlüssel gibt es nur das Hash-Byte, und das trifft fremde Kanäle
+  mit.
+- **Ein Fehltreffer ist rechnerisch möglich**, mit rund 1 zu 65 536 je eingetragenem Kanal und Paket —
+  der Code ist 2 Byte lang. Bei einer Handvoll Einträgen ist das ohne praktische Bedeutung und
+  jedenfalls um Größenordnungen besser als ein Filter auf ein einzelnes Hash-Byte.
 - **Path-Prune ist bei 1-Byte-Hashes unzuverlässig**, weil der Pfad-Hop mehrdeutig ist. Bei
   Mehrbyte-Hashes zuverlässig.
 

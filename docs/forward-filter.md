@@ -3,7 +3,7 @@
 *🇩🇪 [Deutsche Fassung](./forward-filter.de.md) (primary) · 📻 [Flashing guide](./flashing-repeater.md)*
 
 This manual documents **every** forward-filter feature of the ACETyr repeater firmware
-(`repeater-v1.17.0.fwdfilterN`) in one place. It supersedes the per-release descriptions — from now on
+(`repeater-v1.17.1.fwdfilterN`) in one place. It supersedes the per-release descriptions — from now on
 the release notes only record *what changed*, this document describes *what the firmware does*.
 
 ---
@@ -38,6 +38,9 @@ management in the MeshCore app, admin login required). See
 | `set fwd.whitelist.del` | `<hex prefix>` | — | Remove all entries matching the prefix |
 | `set fwd.whitelist.clear` | — | — | Empty the whitelist |
 | `set fwd.scoped.reserve` | `0`–`100` | `0` | Percent of the airtime allowance (60 s window) kept free for scoped traffic |
+| `set fwd.chan.block` | `#name` · `<32\|64-hex>` `[label]` | — | Add a channel to the blocklist (max. 16) |
+| `set fwd.chan.unblock` | `#name` · `<32\|64-hex>` · `<index>` | — | Remove one entry |
+| `set fwd.chan.clear` | — | — | Empty the blocklist |
 | `set flood.max.request` | `0`–`64` | `64` | Hop cap for flooded REQUEST packets |
 | `set flood.max.anon.request` | `0`–`64` | `64` | Hop cap for flooded ANON_REQUEST packets |
 | `set flood.max.response` | `0`–`64` | `64` | Hop cap for flooded RESPONSE packets |
@@ -52,6 +55,9 @@ Every `set` has a matching `get`:
 | `get fwd.whitelist` | `> on 0hop=allow 3 entries \| a1b2c3d4e5f6 \| …` |
 | `get fwd.scoped.reserve` | `> 40` |
 | `get fwd.scoped.stats` | `> reserve=40% fwd_scoped=812 fwd_unscoped=95 drop_unscoped=1043 saved_air=214500ms air=1180/6000ms/60s` |
+| `get fwd.chan` | `> 3 entries \| 2F B2 9C` |
+| `get fwd.chan <index>` | `> 1: #slovakia (B2)` |
+| `get fwd.chan.stats` | `> blocked=1832 saved_air=856000ms` |
 | `get flood.max.request` | `> 64` |
 
 List output shows only the **6-byte prefix** of each pubkey; in `get fwd.block`, `P` = *prune* and
@@ -251,6 +257,151 @@ like a counter reset.
 
 ---
 
+## Stage 5 — channel blocklist
+
+```
+set fwd.chan.block #austria       # block a channel by its name
+set fwd.chan.block <32|64-hex>    # block a channel by its key
+set fwd.chan.unblock #austria     # undo -- also by index or by key
+set fwd.chan.clear                # empty the blocklist
+```
+
+Drops flooded **group messages** (`GRP_TXT`, `GRP_DATA`) belonging to a channel you listed. Nothing
+else is touched: direct messages, adverts, requests, and group messages on every channel you did not
+list all pass as before.
+
+Measured network-wide, group traffic is **21 % of flood airtime** — the second largest item after
+adverts. Part of it is channels with no receiver at your site at all.
+
+### Why not just match the hash byte
+
+A group packet identifies its channel by **one single byte**, a truncated hash of the channel key. In
+a 24-hour measurement across the whole network **244 of the 256 values were in use**. Filtering on
+that byte necessarily catches unrelated channels, and the protocol offers nothing longer.
+
+How badly depends on the byte, and you cannot tell in advance. Measured:
+
+| byte | share that really is the channel you meant |
+|---|---|
+| `0xD9` (`#test`) | 96 % |
+| `0xDD` (`#vienna`) | 77 % |
+| `0xB3` (`#hamradio`) | 43 % |
+| `0x98` (`#yo`) | 1 % |
+
+On `#yo`, a hash-byte filter would drop **99 % other people's traffic** and 1 % of what you aimed at.
+Without the key the two cases cannot be told apart — which is why this stage works differently.
+
+### The node recognises the channel without being able to read it
+
+Instead of comparing the hash byte, you store the **channel key**. Every group packet carries a
+2-byte message authentication code (MAC) computed under exactly that key over the encrypted text. If
+it verifies, the packet belongs to that channel — not probably, but demonstrably.
+
+The filter verifies that code **and stops there**. It decrypts nothing. In the firmware's receive
+path the same check is followed by a `decrypt()`; on the filter path that call does not exist, and
+that is checkable in the source (`src/helpers/ChannelFilter.h`). A repeater can therefore name the
+channel it drops while remaining unable to read a single message.
+
+Confirmed on the bench against real traffic: byte `0xD9` carried 2130 packets in 24 hours, 2048 of
+them `#test` and 82 belonging to other channels. The configured `#test` key recognised all 2048 and
+let all 82 through. A hash-byte filter would have dropped all 2130.
+
+### Adding channels
+
+**By name** — for the public hashtag channels the apps offer:
+
+```
+set fwd.chan.block #austria
+> OK (hash FB)
+```
+
+The node derives the key from the name exactly as the clients do. The name is taken **literally**:
+`#ping` matches, while `ping`, `#Ping` and `#PING` match nothing. The `#` is part of it.
+
+**By key** — for channels with their own PSK, 32 or 64 hex characters, with an optional label:
+
+```
+set fwd.chan.block 8b3387e9c5cdea6ac9e5edbaa115cd72 Public
+> OK (hash 11)
+```
+
+**Viewing.** The list shows hash bytes only, so that a full table still fits in one reply over the
+air; details come one entry at a time:
+
+```
+get fwd.chan
+> 3 entries | 2F B2 9C
+
+get fwd.chan 1
+> 1: #slovakia (B2)
+```
+
+**Removing** works by name, by key or by index:
+
+```
+set fwd.chan.unblock 1
+> OK (1 removed)
+```
+
+### What is behind a hash byte?
+
+The node cannot answer that — a hash does not run backwards, and the node knows only the channels you
+entered yourself. It only has to be answered once, before you decide what to block.
+
+At your own site you usually know which channels are in use: enter the names, read `get fwd.chan`,
+done. Where that is not enough, do it on a computer: collect candidate names, derive the key from
+each, and MAC-verify it against real packets. That is certainty rather than a guess among 256
+possibilities — the same mechanism the filter itself uses. A ready-made tool is in the project at
+`reference/corescope_channel_profile.py --identify`.
+
+### The strongest case: channels with no local receiver
+
+Measured at an Austrian site over 24 hours: the repeater forwarded traffic from **ten channels** that
+have no receiver there — `#hungary`, `#slovakia`, `#kosice`, `#switzerland`, `#polska`, `#turiec`,
+`#poland`, `#yo`, `#australia` and `#slovenia`, together **4.8 % of group airtime**.
+
+That is the uncontroversial part: this traffic reaches nobody through this node. A busy *local*
+channel is a different matter — blocking one is an operator's decision that affects other users of
+the same repeater. The firmware does not make it for you and makes none on its own.
+
+### Checking the effect
+
+```
+get fwd.chan.stats
+> blocked=1832 saved_air=856000ms
+```
+
+- `blocked` — group packets dropped
+- `saved_air` — airtime saved by those drops, in milliseconds
+
+Like the other counters, both live in RAM and **go back to 0 on every restart**.
+
+### Cost
+
+The check costs CPU time, but only for packets whose hash byte matches an entry at all — everything
+else is done after one byte comparison. Measured, on a match:
+
+| | per check |
+|---|---|
+| RAK4631 (nRF52840, crypto hardware) | **210 µs** |
+| Heltec V3 (ESP32-S3, software) | **482 µs** |
+
+Against the ~470 ms the same packet occupies on air, that is **0.1 %**. With an empty blocklist the
+check does not run at all.
+
+### Keys on a mast
+
+A repeater holding channel keys is a different trust object from one that holds none. For the public
+`#hashtag` channels that is immaterial: their key is the hash of the name, anyone can derive it, so
+the node carries nothing an attacker did not already have.
+
+A private channel with its own PSK is another matter. A device on a mast can be taken down and read
+out, and the key inside it opens that channel for good. **Recommendation: use this stage for public
+channels.** Entering a raw key is possible, but it is the exception and should be a deliberate
+decision about one specific device in one specific place.
+
+---
+
 ## Per-payload flood hop caps
 
 ```
@@ -306,6 +457,16 @@ set fwd.scoped.reserve 40
 Check `get fwd.scoped.stats` after a few hours and adjust, watching `air=` to see whether the node
 ever gets near its allowance at all. 100 drops unscoped floods as soon as there
 is any budget pressure at all.
+
+**"I am relaying channels nobody here listens to."**
+```
+set fwd.chan.block #hungary
+set fwd.chan.block #polska
+get fwd.chan
+```
+The uncontroversial case. Write down first which channels are actually read at your site — the rest
+is your candidate list. Check `get fwd.chan.stats` after a day: if `blocked` is still 0, that channel
+was not passing through here anyway and the entry can go.
 
 ---
 
@@ -390,6 +551,8 @@ Practical consequences:
 | `fwdfilter6` | 2026-07-10 | Stage 4 (`fwd.scoped.reserve`) + `get fwd.scoped.stats` |
 | `fwdfilter7` | 2026-07-13 | Fix: airtime estimate guarded against error codes · version string gained a leading `v` |
 | `fwdfilter8` | 2026-08-10 | Rebased onto MeshCore 1.17.0 · Fix: stage 4 measures over a 60 s window instead of the hour bucket (1–99 was previously inert) · Fix: noise-floor estimator could latch at −120 · Fix: the guarded airtime estimate aborted in-flight transmits |
+| `fwdfilter9` | 2026-08-16 | Rebased onto MeshCore 1.17.1 · carried noise-floor fix brought up to date (no change to any `fwd.*` command) |
+| `fwdfilter10` | pending | Stage 5 (`fwd.chan.block`) + `get fwd.chan` / `get fwd.chan.stats` |
 
 **Recommendation: always run the newest release.** Every older one carries at least one of the bugs
 fixed above.
@@ -398,7 +561,7 @@ fixed above.
 
 ## Limits and known caveats
 
-- **16 entries each** for the whitelist and the policy table. Enough for backbone adjacencies, not for
+- **16 entries each** for the whitelist, the policy table and the channel blocklist. Enough for backbone adjacencies, not for
   network-wide lists.
 - **List output is truncated.** `get fwd.whitelist`/`get fwd.block` will not show every entry on a full
   table. The entries are still active.
@@ -413,5 +576,13 @@ fixed above.
   different airtime per packet — the behaviour is inferred, not measured.
 - **Path prune is unreliable at 1-byte hashes**, because the path hop is ambiguous. Reliable at
   multibyte hash sizes.
+- **The channel blocklist only acts on flooded group packets.** Group traffic sent as a direct packet
+  passes. In the measurement that was 3 packets out of 13 820, so the exception costs practically
+  nothing and keeps the intervention narrow.
+- **A channel whose key you do not have cannot be blocked selectively.** That is the point rather than
+  an oversight: without the key there is only the hash byte, and that catches unrelated channels.
+- **A false match is arithmetically possible**, at roughly 1 in 65 536 per configured channel per
+  packet — the code is 2 bytes long. With a handful of entries this has no practical meaning, and it
+  is orders of magnitude better than filtering on a single hash byte.
 
 Please report bugs and feedback as an [issue](https://github.com/ACETyr/MeshCore/issues).
