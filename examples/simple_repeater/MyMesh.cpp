@@ -1723,14 +1723,28 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       sprintf(reply, "> blocked=%lu saved_air=%lums",
               (unsigned long)n_drop_chan, (unsigned long)airtime_saved_chan);
     } else if (memcmp(config, "fwd.chan", 8) == 0) {
-      char* p = reply;
-      p += sprintf(p, "> %d entr%s", (int)_fwd_prefs.chan_count, _fwd_prefs.chan_count == 1 ? "y" : "ies");
-      for (int k = 0; k < _fwd_prefs.chan_count && (p - reply) < 130; k++) {
-        // A raw-key entry has no name to show -- the wire hash is all the operator gets, because
-        // the byte is not reversible. reference/chan_filter_vectors.py names it host-side.
-        p += sprintf(p, " | %d:%s (%02X)", k,
-                     _fwd_prefs.chan_label[k][0] ? _fwd_prefs.chan_label[k] : "(raw)",
-                     (uint32_t)_fwd_prefs.chan_hash[k]);
+      // Two forms, because the reply buffer is 160 bytes and a labelled list of FWD_CHAN_MAX
+      // entries does not fit in it. Listing every entry with its label would silently truncate,
+      // and the table size would end up dictated by the width of a serial reply.
+      //   get fwd.chan       -> compact: count + one hash byte each, always fits
+      //   get fwd.chan <n>   -> one entry with its label
+      if (config[8] == ' ') {
+        int k = atoi(&config[9]);
+        if (k < 0 || k >= _fwd_prefs.chan_count) {
+          sprintf(reply, "Error: index 0..%d", (int)_fwd_prefs.chan_count - 1);
+        } else {
+          // A raw-key entry has no name to show -- the wire hash is not reversible.
+          // reference/chan_filter_vectors.py names a hash byte host-side.
+          sprintf(reply, "> %d: %s (%02X)", k,
+                  _fwd_prefs.chan_label[k][0] ? _fwd_prefs.chan_label[k] : "(raw)",
+                  (uint32_t)_fwd_prefs.chan_hash[k]);
+        }
+      } else {
+        char* p = reply;
+        p += sprintf(p, "> %d entr%s", (int)_fwd_prefs.chan_count, _fwd_prefs.chan_count == 1 ? "y" : "ies");
+        for (int k = 0; k < _fwd_prefs.chan_count; k++) {
+          p += sprintf(p, "%s%02X", k ? " " : " | ", (uint32_t)_fwd_prefs.chan_hash[k]);
+        }
       }
     } else if (memcmp(config, "fwd.scoped.reserve", 18) == 0) {   // dedicated getter (set/get symmetry)
       sprintf(reply, "> %d", (int)_fwd_prefs.scoped_reserve_pct);

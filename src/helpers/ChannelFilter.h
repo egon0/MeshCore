@@ -21,9 +21,13 @@
 // than a promise in a document.
 // ---------------------------------------------------------------------------
 
-// Eight is a size, not a limit found by measurement: four channels are already a third of all
-// group airtime in the live mesh, so a longer list buys little and costs RAM on every node.
-#define FWD_CHAN_MAX          8
+// 16, matching FWD_BLOCK_MAX and FWD_WL_MAX. Sized from the use case the feature is argued on:
+// an Austrian repeater was measured forwarding TEN channels with no local receiver (#hungary,
+// #slovakia, #kosice, #switzerland, #polska, #turiec, #poland, #yo, #australia, #slovenia), so a
+// table of 8 could not express it. RAM is not the constraint -- 16 entries cost 784 B on a node
+// using 15 % of its RAM -- and neither is CPU: with entries on distinct hash bytes a packet can
+// match at most one, so the per-packet cost does not depend on this number at all.
+#define FWD_CHAN_MAX          16
 #define FWD_CHAN_LABEL_LEN    16   // display only; "" for a raw-key entry
 
 namespace mesh {

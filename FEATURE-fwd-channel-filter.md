@@ -1,9 +1,10 @@
 # FEATURE — Stage 5: key-based channel blocklist (`fwd.chan.block`)
 
-**Status: SPEC ONLY — nothing implemented.** Written 2026-08-17 off the CoreScope measurement below.
-Target: fwdfilter10 at the earliest, on top of `repeater-v1.17.1.fwdfilter9`. The key derivation that
-blocked this spec is now **verified end to end against live traffic** (§ Key derivation); no known
-blocker remains, only the site-local justification question in § Open.
+**Status: IMPLEMENTED and hardware-validated** (2026-08-17). Key derivation verified end to end
+against live traffic, the MAC gate asserted in CI, the CLI/persistence/positive/negative-control
+tests run on the bench, and the HMAC cost measured on both crypto paths — see § Test plan. Open
+before release: Stage 5 section in `docs/forward-filter.{de,}.md`, then tag as fwdfilter10 on top
+of `repeater-v1.17.1.fwdfilter9`.
 
 ## Problem
 
@@ -118,7 +119,15 @@ argument for this design.
 
 Incidentally this identifies the busiest channels on the AT network: `#test`, the default `Public`
 channel, `#austria` and `#ping` — **four channels are a third of all group airtime**, which is what
-makes a blocklist of only 8 entries a sensible size.
+makes a short blocklist worth having in the first place.
+
+**Sizing, corrected 2026-08-17.** The first draft set `FWD_CHAN_MAX = 8` and justified it after the
+fact ("a longer list buys little and costs RAM"). Neither half survives checking: 16 entries cost
+784 B on a node using 15 % of its RAM, and with entries on distinct hash bytes a packet matches at
+most one, so the per-packet cost does not depend on the table size at all. What settles it is the use
+case this document argues the feature on — an Austrian repeater was measured forwarding **ten**
+channels with no local receiver, which a table of 8 cannot express. `FWD_CHAN_MAX = 16`, matching
+`FWD_BLOCK_MAX` and `FWD_WL_MAX`.
 
 ## Design (proposal)
 
@@ -154,7 +163,8 @@ nothing measurable and keeps the blast radius small.
 set fwd.chan.block #atchat        # public hashtag channel: key derived locally from the name
 set fwd.chan.block <64-hex>       # raw 256-bit channel key, optional label via a second arg
 set fwd.chan.unblock #atchat      # or an index
-get fwd.chan.block                # "> 2 entries | #atchat (D9) | (11)"
+get fwd.chan                      # "> 10 entries | 2F B2 9C E7 8D F1 92 98 36 95"
+get fwd.chan <index>              # "> 3: #switzerland (E7)"
 get fwd.chan.stats                # "> blocked=1832 saved_air=1691000ms"
 ```
 
@@ -166,11 +176,19 @@ the feature's effect observable on a live node instead of inferred from the sour
 New in `struct FwdPrefs`:
 
 ```c
-#define FWD_CHAN_MAX  8            // 8 x (32 key + 1 hash + 16 label) = 392 bytes
+#define FWD_CHAN_MAX  16           // 16 x (32 key + 1 hash + 16 label) = 784 bytes
 uint8_t chan_count;
 uint8_t chan_keys[FWD_CHAN_MAX][FWD_KEY_SIZE];   // 32-byte buffer, as GroupChannel::secret
 uint8_t chan_hash[FWD_CHAN_MAX];                 // cached SHA256(secret)[0]
 char    chan_label[FWD_CHAN_MAX][16];            // display only; "" for raw-key entries
+```
+
+**The list view is deliberately compact.** The CLI reply buffer is 160 bytes, so a labelled list of
+16 entries does not fit and would silently truncate. Rather than let the width of a serial reply
+dictate the table size, `get fwd.chan` prints the count and one hash byte per entry (~62 B at 16
+entries) and `get fwd.chan <index>` prints the one entry with its label.
+
+```c
 ```
 
 New TLV tags in the free 0x60 region: `FWD_TAG_CHAN_COUNT 0x60`, `_KEYS 0x61`, `_HASH 0x62`,
@@ -241,8 +259,9 @@ HMAC computed over the wrong byte range — all three break the suite. 10/10 gre
 Run on the bench RAK4631 (COM12) against the Heltec V3 companion (COM3), 2026-08-17.
 
 1. ✅ **CLI round-trip.** `#name` and raw-hex (32- and 64-hex) forms, label argument, bad input
-   rejected, duplicate `set` updates rather than appends, clamp at `FWD_CHAN_MAX` (9th entry →
-   `Error: table full`), `unblock` by name, by index and by raw key, a miss reporting `0 removed`.
+   rejected, duplicate `set` updates rather than appends, clamp at `FWD_CHAN_MAX` (the entry past
+   the limit → `Error: table full`), `unblock` by name, by index and by raw key, a miss reporting
+   `0 removed`, and both `get` forms.
    **The device derived the same hashes as the live traffic**, independently of the host script:
    `#test` `D9` · `#austria` `FB` · `#ping` `28` · `#vienna` `DD` · `#hungary` `2F` ·
    `#slovakia` `B2` · the mainline `Public` PSK `11`.
@@ -291,7 +310,12 @@ Run on the bench RAK4631 (COM12) against the Heltec V3 companion (COM3), 2026-08
      **4** matches into `MACThenDecrypt()`. Stage 5 adds occurrences of an existing cost, it does
      not introduce a new class of one.
 
-   `FWD_CHAN_MAX = 8` stays as it is; the measurement is the reason it should not grow.
+   ⚠️ An earlier version of this section claimed the measurement was the reason to keep
+   `FWD_CHAN_MAX` at 8. It is not, and the causality ran backwards: the limit predated the
+   measurement. With entries on **distinct** hash bytes a packet matches at most one, so the
+   per-packet cost is independent of the table size; only the adversarial all-on-one-byte case
+   scales with it, and reaching that takes a deliberate brute-force search against oneself. The
+   limit is now 16, sized by the use case — see *Sizing* above.
 
 ## Open
 
