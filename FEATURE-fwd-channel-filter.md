@@ -8,23 +8,31 @@ blocker remains, only the site-local justification question in § Open.
 ## Problem
 
 Group-channel traffic is a large, measurable slice of what a repeater forwards, and some of it is a
-single noisy channel. Measured 2026-08-16 over 24 h across all CoreScope observers, 76 298 unique
+single noisy channel. Re-measured 2026-08-17 over 24 h across all CoreScope observers, 75 678 unique
 flood packets (`reference/corescope_channel_profile.py`, class-1 fields only — `payload_type`,
 `route_type`, `raw_hex`; nothing derived from path-hash attribution):
 
 | | share of flood packets | share of flood airtime |
 |---|---|---|
-| ADVERT | 18.6 % | 32.7 % |
-| **GRP_TXT** | **19.2 %** | **22.3 %** |
-| REQ | 23.0 % | 13.9 % |
+| ADVERT | 18.9 % | 31.0 % |
+| **GRP_TXT** | **18.3 %** | **20.9 %** |
+| REQ | 23.3 % | 15.4 % |
 | GRP_DATA | 0.0 % | 0.1 % |
 
-Group traffic is **22.4 % of flood airtime**. It concentrates hard: the top 5 channel hashes carry
-42.4 % of group packets, and the top 3 alone are **7.4 % of all flood airtime**. The single busiest,
-`0xD9`, is 3.3 %.
+Group traffic is **21.0 % of flood airtime**. It concentrates hard: the top 5 channel hashes carry
+43.1 % of group packets, and the top 3 alone are **7.2 % of all flood airtime**. The single busiest,
+`0xD9`, is 3.4 %.
 
-Group traffic is effectively flood-only here — of 14 638 GRP_TXT packets in the window, 14 637 were
-flood and 1 was direct.
+> The airtime column was **corrected on 2026-08-17**. The first draft fed the wire coding rate `5`
+> into the Semtech formula term `(CR + 4)`, giving a payload-symbol coefficient of 9 — a coding rate
+> of 4/9, which does not exist. Correct is 5. That inflated every airtime figure by 1.20× (8 B) to
+> 1.67× (184 B); because long packets were inflated more, type *shares* moved too. The model is now
+> verified byte-for-byte against `SX126x::calculateTimeOnAir()` — the function the firmware itself
+> bills airtime with — by `reference/airtime_model_check.py --selftest`. **The conclusion is
+> unchanged**: group traffic 22.4 % → 21.0 %, top-3 hashes 7.4 % → 7.2 %.
+
+Group traffic is effectively flood-only here — of 13 820 GRP_TXT packets in the window, 13 817 were
+flood and 3 were direct.
 
 **Why the obvious implementation is wrong.** The wire carries only `payload[0]`, a one-byte channel
 hash (`SHA256(secret)[0]`, `BaseChatMesh.cpp:887`). Matching on that byte alone is not selective:
@@ -77,26 +85,27 @@ Candidate names come from **CoreScope's own `/api/channels`** (42 channels it ha
 guessing a wordlist was reinventing that, and worse: guessing found 12 channels, CoreScope's list
 found 27, including every neighbouring-country channel nobody here would think to try. The name comes
 from CoreScope; the attribution is still MAC-verified locally, so no class-2 inference is involved.
-`corescope_channel_profile.py --identify` named **46 % of group flood airtime**:
+`corescope_channel_profile.py --identify` named **48.3 % of group flood airtime** (2026-08-17 window,
+corrected airtime model):
 
 | hash | channel | share of group airtime | share of that hash byte that really is this channel |
 |---|---|---|---|
-| `0xD9` | `#test` | 14.4 % | 96 % |
-| `0x11` | `Public` (mainline default PSK) | 11.4 % | 96 % |
-| `0xFB` | `#austria` | 4.3 % | 96 % |
-| `0x28` | `#ping` | 3.1 % | 92 % |
+| `0xD9` | `#test` | 15.4 % | 96 % |
+| `0x11` | `Public` (mainline default PSK) | 11.8 % | 97 % |
+| `0xFB` | `#austria` | 4.5 % | 97 % |
+| `0x28` | `#ping` | 3.4 % | 92 % |
 | `0x2F` | `#hungary` | 2.5 % | 93 % |
-| `0xCA` | `#bot` | 2.0 % | 96 % |
-| `0xDD` | `#vienna` | 1.9 % | 79 % |
-| `0xB2` | `#slovakia` | 1.7 % | 95 % |
+| `0xCA` | `#bot` | 2.1 % | 96 % |
 | `0x81` | `#wardriving` | 1.7 % | 89 % |
-| **`0xB3`** | **`#hamradio`** | 0.5 % | **43 %** |
-| **`0x8D`** | **`#polska`** | 0.1 % | **19 %** |
+| `0xB2` | `#slovakia` | 1.7 % | 95 % |
+| `0xDD` | `#vienna` | 1.6 % | 77 % |
+| **`0xB3`** | **`#hamradio`** | 0.6 % | **43 %** |
+| **`0x8D`** | **`#polska`** | 0.1 % | **20 %** |
 | **`0x98`** | **`#yo`** | 0.0 % | **1 %** |
 
 **The strongest argument for the feature is in that list.** An Austrian repeater demonstrably forwards
 `#hungary`, `#slovakia`, `#polska`, `#switzerland`, `#kosice`, `#turiec` and `#slovenia` — together
-over 4 % of group airtime spent on channels that address nobody in the local network. Unlike blocking
+**4.8 % of group airtime** spent on channels that address nobody in the local network. Unlike blocking
 a busy local channel, dropping those is not a contentious policy call.
 
 Names are case- and prefix-exact — the key is `SHA256` of the literal string, so `#ping` matches while
