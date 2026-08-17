@@ -73,8 +73,11 @@ silently never matches.
 **The residual is the collision, measured directly.** All 39 non-matching packets on `0xD9` parse
 correctly (their MAC equals `decoded_json.mac`) but belong to some other channel.
 
-Sweeping a candidate list (`corescope_channel_profile.py --identify`) named **37 % of group flood
-airtime** and showed how badly the collision rate varies with how busy the target channel is:
+Candidate names come from **CoreScope's own `/api/channels`** (42 channels it has seen named) —
+guessing a wordlist was reinventing that, and worse: guessing found 12 channels, CoreScope's list
+found 27, including every neighbouring-country channel nobody here would think to try. The name comes
+from CoreScope; the attribution is still MAC-verified locally, so no class-2 inference is involved.
+`corescope_channel_profile.py --identify` named **46 % of group flood airtime**:
 
 | hash | channel | share of group airtime | share of that hash byte that really is this channel |
 |---|---|---|---|
@@ -82,11 +85,19 @@ airtime** and showed how badly the collision rate varies with how busy the targe
 | `0x11` | `Public` (mainline default PSK) | 11.4 % | 96 % |
 | `0xFB` | `#austria` | 4.3 % | 96 % |
 | `0x28` | `#ping` | 3.1 % | 92 % |
+| `0x2F` | `#hungary` | 2.5 % | 93 % |
+| `0xCA` | `#bot` | 2.0 % | 96 % |
 | `0xDD` | `#vienna` | 1.9 % | 79 % |
-| `0x62` | `#wetter` | 0.7 % | 87 % |
-| `0x1C` | `#at` | 0.0 % | 56 % |
-| **`0x87`** | **`#wien`** | 0.1 % | **47 %** |
-| **`0xB8`** | **`#chat`** | 0.0 % | **38 %** |
+| `0xB2` | `#slovakia` | 1.7 % | 95 % |
+| `0x81` | `#wardriving` | 1.7 % | 89 % |
+| **`0xB3`** | **`#hamradio`** | 0.5 % | **43 %** |
+| **`0x8D`** | **`#polska`** | 0.1 % | **19 %** |
+| **`0x98`** | **`#yo`** | 0.0 % | **1 %** |
+
+**The strongest argument for the feature is in that list.** An Austrian repeater demonstrably forwards
+`#hungary`, `#slovakia`, `#polska`, `#switzerland`, `#kosice`, `#turiec` and `#slovenia` — together
+over 4 % of group airtime spent on channels that address nobody in the local network. Unlike blocking
+a busy local channel, dropping those is not a contentious policy call.
 
 Names are case- and prefix-exact — the key is `SHA256` of the literal string, so `#ping` matches while
 `ping`, `#Ping` and `#PING` all match nothing.
@@ -219,10 +230,11 @@ block — and that belongs in the docs as a recipe, not as a gate on shipping.
 ### Naming a hash the operator has not configured
 
 `get fwd.chan.block` can only print labels for channels the operator entered; the wire hash itself is
-not reversible. But it does not have to be: `corescope_channel_profile.py --identify` derives the key
-from each candidate name and **MAC-verifies it against real packets**, which is certainty rather than
-a 1-in-256 byte guess — the same mechanism the filter uses. An 87-name list already names a third of
-group airtime, and an operator who knows their local channel names will do much better.
+not reversible. But it does not have to be: `corescope_channel_profile.py --identify` takes the names
+CoreScope already publishes at `/api/channels`, derives the key from each, and **MAC-verifies it
+against real packets** — certainty rather than a 1-in-256 byte guess, the same mechanism the filter
+uses. That names 46 % of group airtime today, and an operator who knows their local channel names
+will do better.
 
 This belongs in the German docs alongside the CLI, or the operator sees `0xD9` and has no way to know
 what they would be blocking. Deliberately a **host-side** tool: the repeater needs none of it, and the
