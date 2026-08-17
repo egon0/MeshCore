@@ -260,10 +260,38 @@ Run on the bench RAK4631 (COM12) against the Heltec V3 companion (COM3), 2026-08
    truncation; an earlier draft of this line wrote `SHA256(SHA256(name))[0]`, which is neither.
 6. ✅ **Airtime.** 1401 ms over 3 drops = 467 ms/packet, against 488 ms for a 55-byte frame from the
    corrected SF8 model — the counter is billing real time-on-air, not a guess.
-7. ⬜ **CPU on the forwarding path** — one HMAC-SHA256 per hash-byte match. **Not measured.** The
-   structural bound holds (the byte compare rejects first, and `FWD_CHAN_MAX` caps the rest), and
-   nothing anomalous showed on either board, but that is an argument, not a measurement. Needs
-   instrumented timing on a RAK4631 (CC310) **and** a Heltec V3 (software) before release.
+7. ✅ **CPU on the forwarding path — measured on both crypto paths.**
+
+   | | RAK4631 (nRF52840, CC310 hardware) | Heltec V3 (ESP32-S3, software SHA256) |
+   |---|---|---|
+   | gate off (`chan_count = 0`) | below the timer's resolution | **0.49 µs** per call |
+   | per HMAC (1 entry, hash byte matches) | **210 µs** | **482 µs** |
+   | 8 entries *all colliding on one byte* | **1.69 ms** | **3.85 ms** |
+
+   Measured with `-D FWD_CHAN_TIMING` (a scaffold that is compiled into no release build —
+   byte-checked absent from the shipped image). The figure that counts is the **difference**
+   against `chan_count = 0`; a single absolute number would mostly be `micros()` overhead.
+   **Control:** cost scales exactly linearly with the number of entries — 42 / 84 / 169 / 338 ms
+   per 200 calls for 1 / 2 / 4 / 8 on the RAK, 96 / 192 / 385 / 769 ms on the Heltec. Without that
+   the harness could have been measuring something constant. Payload length barely matters
+   (184 B vs 4 B differ by ~10 %), so the cost is per-HMAC overhead, not per byte.
+
+   ⚠️ **This is 5–20× more than estimated before measuring** (the guess was "tens to a few hundred
+   µs for all eight"). It is still comfortable, and the reasons are worth writing down rather than
+   waving at:
+   - The cost is paid **only** for a group packet whose `payload[0]` equals a configured channel's
+     hash byte — everything else stops at a byte compare. Against the ~467 ms of airtime such a
+     packet occupies, 482 µs is **0.1 %**.
+   - The 8-colliding-entries row is adversarial, not a configuration anyone reaches by accident:
+     it took a brute-force search to find eight names on one byte. With eight *ordinary* channels a
+     packet matches at most one, so the realistic worst case is the middle row.
+   - Even the adversarial 3.85 ms is under one LoRa symbol at SF8/62.5 kHz (4.096 ms), and RX is
+     buffered, so it cannot cost a packet.
+   - Mainline already pays this same cost on the receive path: `searchChannelsByHash()` feeds up to
+     **4** matches into `MACThenDecrypt()`. Stage 5 adds occurrences of an existing cost, it does
+     not introduce a new class of one.
+
+   `FWD_CHAN_MAX = 8` stays as it is; the measurement is the reason it should not grow.
 
 ## Open
 

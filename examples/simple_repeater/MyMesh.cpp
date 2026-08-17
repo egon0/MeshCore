@@ -1649,6 +1649,36 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       _fwd_prefs.chan_count = 0;
       _fwd_prefs.save(_fs);
       strcpy(reply, "OK");
+#ifdef FWD_CHAN_TIMING
+    } else if (memcmp(config, "fwd.chan.bench ", 15) == 0) {
+      // Measurement scaffold, compiled ONLY with -D FWD_CHAN_TIMING -- not in any release build.
+      // Times the gate itself on a synthetic payload whose hash byte matches every configured
+      // entry, so every entry is forced through an HMAC and none of them match: the worst case.
+      // The number that matters is the DIFFERENCE against chan_count = 0, which measures the same
+      // loop with the gate skipped. A single absolute figure would just be micros() overhead.
+      //   set fwd.chan.bench <iterations> [payload_bytes]
+      int iters = atoi(&config[15]);
+      if (iters < 1) iters = 1;
+      int plen = MAX_PACKET_PAYLOAD;
+      char* sp = strchr((char*)&config[15], ' ');
+      if (sp) {
+        int p = atoi(sp + 1);
+        if (p >= CHAN_PAYLOAD_MIN_LEN && p <= MAX_PACKET_PAYLOAD) plen = p;
+      }
+      static uint8_t bench_buf[MAX_PACKET_PAYLOAD];
+      for (int i = 0; i < plen; i++) bench_buf[i] = (uint8_t)i;
+      bench_buf[0] = _fwd_prefs.chan_count ? _fwd_prefs.chan_hash[0] : 0;
+      volatile int sink = 0;   // keeps the optimiser from deleting the whole loop
+      unsigned long t0 = micros();
+      for (int i = 0; i < iters; i++) {
+        sink += mesh::findBlockedChannel(bench_buf, plen, _fwd_prefs.chan_keys,
+                                         _fwd_prefs.chan_hash, _fwd_prefs.chan_count);
+      }
+      unsigned long dt = micros() - t0;
+      sprintf(reply, "> n=%d len=%d iters=%d: %luus total, %luns/call (sink=%d)",
+              (int)_fwd_prefs.chan_count, plen, iters, dt,
+              (unsigned long)((uint64_t)dt * 1000 / (uint32_t)iters), (int)sink);
+#endif
     } else {
       return false;   // not a fwd 'set' -> let CommonCLI handle it
     }
