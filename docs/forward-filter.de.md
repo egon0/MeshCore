@@ -275,17 +275,24 @@ Verwirft geflutete **Gruppennachrichten** (`GRP_TXT`, `GRP_DATA`), die zu einem 
 Kanäle gehören. Alles andere bleibt unberührt: Direktnachrichten, Adverts, Anfragen, und
 Gruppennachrichten aller nicht eingetragenen Kanäle.
 
-Gruppenverkehr ist netzweit gemessen **21 % der Flood-Airtime** — der zweitgrößte Posten nach den
-Adverts. Ein Teil davon sind Kanäle, für die es am eigenen Standort keinen einzigen Empfänger gibt.
+In den Zahlen unten liegt **21 % der Flood-Airtime** auf Gruppennachrichten — nach den Adverts der
+zweitgrößte Posten.
+
+> **Woher die Zahlen stammen, und was sie nicht sind.** Grundlage aller Messwerte in diesem Abschnitt
+> ist eine Tagesmessung (2026-08-17) über die Beobachtungsknoten von logger-at, die überwiegend in
+> Österreich stehen und Verkehr aus dem mitteleuropäischen Raum mitschneiden. Das ist ein
+> **Ausschnitt zu einem Zeitpunkt**, keine Eigenschaft des Netzes: eine andere Woche, eine andere
+> Region oder ein anderer Standort ergeben andere Werte. Die Zahlen zeigen die Größenordnung und
+> begründen, warum es diese Stufe gibt — was an **deinem** Standort tatsächlich läuft, sagt dir erst
+> `get fwd.chan.stats`, nachdem du etwas eingetragen hast.
 
 ### Warum nicht einfach über das Hash-Byte
 
 Ein Gruppenpaket trägt seinen Kanal nur als **ein einziges Byte** mit sich, den gekürzten Hash des
-Kanalschlüssels. In einer 24-Stunden-Messung über das gesamte Netz waren davon **244 von 256 Werten
-belegt**. Wer auf dieses Byte filtert, trifft zwangsläufig fremde Kanäle mit, und das Protokoll bietet
-nichts Längeres an.
+Kanalschlüssels. Im mitgeschnittenen Verkehr waren davon **244 von 256 Werten belegt**. Wer auf dieses
+Byte filtert, trifft zwangsläufig fremde Kanäle mit, und das Protokoll bietet nichts Längeres an.
 
-Wie stark, hängt vom Byte ab und ist nicht vorhersehbar. Gemessen:
+Wie stark, hängt vom Byte ab und ist nicht vorhersehbar. Im selben Mitschnitt:
 
 | Byte | gehört wirklich zum gesuchten Kanal |
 |---|---|
@@ -310,9 +317,12 @@ Firmware folgt auf dieselbe Prüfung ein `decrypt()`; auf dem Filterpfad steht d
 zwar nachprüfbar im Quelltext (`src/helpers/ChannelFilter.h`). Ein Repeater kann damit benennen,
 welchen Kanal er verwirft, und trotzdem keine einzige Nachricht mitlesen.
 
-Auf dem Prüfstand gegen echten Funkverkehr belegt: auf dem Byte `0xD9` lagen in 24 Stunden 2130
-Pakete, davon 2048 aus `#test` und 82 aus anderen Kanälen. Der eingetragene `#test`-Schlüssel hat alle
-2048 erkannt und alle 82 durchgelassen. Ein Filter auf das Hash-Byte hätte alle 2130 verworfen.
+Am mitgeschnittenen Verkehr nachgerechnet: auf dem Byte `0xD9` lagen 2130 Pakete, davon 2048 aus
+`#test` und 82 aus anderen Kanälen. Der `#test`-Schlüssel erkannte alle 2048 und ließ alle 82 durch.
+Ein Filter auf das Hash-Byte hätte alle 2130 verworfen.
+
+Über Funk auf dem Prüfstand gegengeprüft, mit zwei eigens dafür gebauten Kanälen auf demselben
+Hash-Byte: der gesperrte wurde verworfen, der andere in derselben Sekunde weitergeleitet.
 
 ### Kanäle eintragen
 
@@ -365,16 +375,17 @@ Schlüssel ableiten und ihn gegen echte Pakete per MAC prüfen. Das ist Gewisshe
 Möglichkeiten — dasselbe Verfahren, das der Filter selbst benutzt. Ein fertiges Werkzeug dafür liegt
 im Projekt unter `reference/corescope_channel_profile.py --identify`.
 
-### Der überzeugendste Fall: Kanäle ohne Empfänger vor Ort
+### Der naheliegendste Fall: Kanäle ohne Bezug zur Region
 
-An einem österreichischen Standort gemessen, 24 Stunden: der Repeater leitete Verkehr aus **zehn
-Kanälen** weiter, für die es dort keinen Empfänger gibt — `#hungary`, `#slovakia`, `#kosice`,
-`#switzerland`, `#polska`, `#turiec`, `#poland`, `#yo`, `#australia` und `#slovenia`, zusammen
-**4,8 % der Gruppen-Airtime**.
+Im Mitschnitt tauchen **zehn Kanäle** auf, deren Namen auf eine andere Gegend zeigen — `#hungary`,
+`#slovakia`, `#kosice`, `#switzerland`, `#polska`, `#turiec`, `#poland`, `#yo`, `#australia` und
+`#slovenia`, zusammen **4,8 % der Gruppen-Airtime**. Ihre Pakete waren also auf dem Funk und wurden
+weitergereicht.
 
-Das ist der unstrittige Teil: dieser Verkehr erreicht über diesen Knoten niemanden. Ein belebter
-*lokaler* Kanal ist etwas anderes — ihn zu sperren ist eine Betreiberentscheidung, die andere Nutzer
-desselben Repeaters trifft. Die Firmware nimmt sie dir nicht ab und trifft von sich aus keine.
+Ob an **deinem** Standort jemand auf einem davon mitliest, weißt nur du. Genau das ist der Punkt: bei
+diesen Kanälen lässt sich die Frage in aller Regel klar beantworten, bei einem belebten lokalen Kanal
+nicht — ihn zu sperren ist eine Betreiberentscheidung, die andere Nutzer desselben Repeaters trifft.
+Die Firmware nimmt sie dir nicht ab und trifft von sich aus keine.
 
 ### Wirkung kontrollieren
 
@@ -401,17 +412,29 @@ alle anderen sind nach einem Byte-Vergleich erledigt. Gemessen, ein Treffer:
 Gegen die rund 470 ms, die dasselbe Paket auf dem Funk belegt, sind das **0,1 %**. Ist die Blockliste
 leer, entfällt die Prüfung vollständig.
 
-### Schlüssel auf einem Mast
+### Was der Knoten dabei speichert
 
-Ein Repeater, der Kanalschlüssel gespeichert hat, ist ein anderes Objekt als einer ohne. Bei den
-öffentlichen `#hashtag`-Kanälen ist das belanglos: deren Schlüssel ist der Hash des Namens, jeder kann
-ihn selbst ausrechnen, der Knoten trägt also nichts, was ein Angreifer nicht ohnehin hätte.
+**Ein Repeater speichert keine Kanalschlüssel — außer denen, die du selbst einträgst.** Ein
+Standard-Repeater ist keinem Kanal beigetreten und hält keinen einzigen. Erst `set fwd.chan.block`
+legt einen Schlüssel in `/fwd_prefs` ab, und zwar genau den, den du angegeben hast.
 
-Bei einem privaten Kanal mit eigenem PSK sieht es anders aus. Ein Gerät auf einem Mast lässt sich
-abbauen und auslesen, und der Schlüssel darin öffnet den Kanal für alle Zukunft. **Empfehlung: diese
-Stufe für öffentliche Kanäle verwenden.** Die Eingabe eines rohen Schlüssels ist möglich, aber sie ist
-der Ausnahmefall und sollte eine bewusste Entscheidung über ein konkretes Gerät an einem konkreten Ort
-sein.
+Bei den beiden üblichen Fällen ist das folgenlos:
+
+- **`#name`-Kanäle** — der Schlüssel ist der Hash des Namens. Jeder, der den Namen kennt, kann ihn
+  ausrechnen. Der Knoten trägt nichts, was ein Angreifer nicht ohnehin hätte.
+- **Der `Public`-Kanal** — dafür ist die Eingabe als Hex-Schlüssel überhaupt gedacht: er hat keinen
+  Namen der Form `#…`, sondern einen festen PSK, der im Quelltext der Firmware und in
+  [der FAQ](./faq.md) steht. Ebenfalls kein Geheimnis.
+
+Nur wenn du den PSK eines **wirklich privaten** Kanals einträgst, liegt danach ein echtes Geheimnis
+auf dem Gerät — und ein Gerät auf einem Mast lässt sich abbauen und auslesen. Der Schlüssel wäre
+derselbe, mit dem sich der Kanal auch mitlesen ließe; dass *diese Firmware* nicht entschlüsselt,
+schützt den Schlüssel nicht vor jemandem, der das Gerät in der Hand hält.
+
+Dieser Fall ist selten und meist gar nicht gewollt: einen privaten Kanal kannst du nur sperren, wenn
+du selbst Mitglied bist — und dann willst du seinen Verkehr in aller Regel eher weiterleiten als
+verwerfen. **Empfehlung: diese Stufe für öffentliche Kanäle verwenden**, und einen privaten Schlüssel
+nur nach bewusster Abwägung über ein konkretes Gerät an einem konkreten Ort.
 
 ---
 

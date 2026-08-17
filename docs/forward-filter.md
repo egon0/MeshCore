@@ -270,16 +270,24 @@ Drops flooded **group messages** (`GRP_TXT`, `GRP_DATA`) belonging to a channel 
 else is touched: direct messages, adverts, requests, and group messages on every channel you did not
 list all pass as before.
 
-Measured network-wide, group traffic is **21 % of flood airtime** — the second largest item after
-adverts. Part of it is channels with no receiver at your site at all.
+In the figures below, **21 % of flood airtime** is group messages — the second largest item after
+adverts.
+
+> **Where the numbers come from, and what they are not.** Every measured figure in this section comes
+> from one 24-hour capture (2026-08-17) by the logger-at observer network, whose nodes sit mostly in
+> Austria and pick up traffic from across central Europe. That is a
+> **snapshot of a slice**, not a property of the network: another week, another region or another
+> site will give different values. The numbers show the order of magnitude and explain why this stage
+> exists — what is actually going on at **your** site is something `get fwd.chan.stats` tells you
+> once you have listed something.
 
 ### Why not just match the hash byte
 
 A group packet identifies its channel by **one single byte**, a truncated hash of the channel key. In
-a 24-hour measurement across the whole network **244 of the 256 values were in use**. Filtering on
-that byte necessarily catches unrelated channels, and the protocol offers nothing longer.
+the captured traffic **244 of the 256 values were in use**. Filtering on that byte necessarily catches
+unrelated channels, and the protocol offers nothing longer.
 
-How badly depends on the byte, and you cannot tell in advance. Measured:
+How badly depends on the byte, and you cannot tell in advance. From the same capture:
 
 | byte | share that really is the channel you meant |
 |---|---|
@@ -302,9 +310,12 @@ path the same check is followed by a `decrypt()`; on the filter path that call d
 that is checkable in the source (`src/helpers/ChannelFilter.h`). A repeater can therefore name the
 channel it drops while remaining unable to read a single message.
 
-Confirmed on the bench against real traffic: byte `0xD9` carried 2130 packets in 24 hours, 2048 of
-them `#test` and 82 belonging to other channels. The configured `#test` key recognised all 2048 and
-let all 82 through. A hash-byte filter would have dropped all 2130.
+Worked through on the captured traffic: byte `0xD9` carried 2130 packets, 2048 of them `#test` and 82
+belonging to other channels. The `#test` key recognised all 2048 and let all 82 through. A hash-byte
+filter would have dropped all 2130.
+
+Cross-checked over the air on the bench with two purpose-built channels sharing one hash byte: the
+listed one was dropped, the other forwarded in the same second.
 
 ### Adding channels
 
@@ -354,15 +365,16 @@ each, and MAC-verify it against real packets. That is certainty rather than a gu
 possibilities — the same mechanism the filter itself uses. A ready-made tool is in the project at
 `reference/corescope_channel_profile.py --identify`.
 
-### The strongest case: channels with no local receiver
+### The most obvious case: channels with no connection to the region
 
-Measured at an Austrian site over 24 hours: the repeater forwarded traffic from **ten channels** that
-have no receiver there — `#hungary`, `#slovakia`, `#kosice`, `#switzerland`, `#polska`, `#turiec`,
-`#poland`, `#yo`, `#australia` and `#slovenia`, together **4.8 % of group airtime**.
+The capture contains **ten channels** whose names point somewhere else — `#hungary`, `#slovakia`,
+`#kosice`, `#switzerland`, `#polska`, `#turiec`, `#poland`, `#yo`, `#australia` and `#slovenia`,
+together **4.8 % of group airtime**. Their packets were on the air and were being passed along.
 
-That is the uncontroversial part: this traffic reaches nobody through this node. A busy *local*
-channel is a different matter — blocking one is an operator's decision that affects other users of
-the same repeater. The firmware does not make it for you and makes none on its own.
+Whether anyone at **your** site reads one of them is something only you know. That is exactly the
+point: for these channels the question usually has a clear answer, and for a busy local channel it
+does not — blocking one is an operator's decision that affects other users of the same repeater. The
+firmware does not make it for you and makes none on its own.
 
 ### Checking the effect
 
@@ -389,16 +401,29 @@ else is done after one byte comparison. Measured, on a match:
 Against the ~470 ms the same packet occupies on air, that is **0.1 %**. With an empty blocklist the
 check does not run at all.
 
-### Keys on a mast
+### What the node stores
 
-A repeater holding channel keys is a different trust object from one that holds none. For the public
-`#hashtag` channels that is immaterial: their key is the hash of the name, anyone can derive it, so
-the node carries nothing an attacker did not already have.
+**A repeater holds no channel keys — other than the ones you enter yourself.** A stock repeater has
+joined no channel and holds none. Only `set fwd.chan.block` puts a key into `/fwd_prefs`, and it is
+exactly the key you gave it.
 
-A private channel with its own PSK is another matter. A device on a mast can be taken down and read
-out, and the key inside it opens that channel for good. **Recommendation: use this stage for public
-channels.** Entering a raw key is possible, but it is the exception and should be a deliberate
-decision about one specific device in one specific place.
+In the two ordinary cases that has no consequence:
+
+- **`#name` channels** — the key is the hash of the name. Anyone who knows the name can derive it, so
+  the node carries nothing an attacker did not already have.
+- **The `Public` channel** — which is what the hex form is really for: `Public` has no `#name`, it
+  has a fixed PSK that is published in the firmware source and in [the FAQ](./faq.md). Also no
+  secret.
+
+Only if you enter the PSK of a **genuinely private** channel does a real secret end up on the device
+— and a device on a mast can be taken down and read out. That key is the same one the channel can be
+read with; the fact that *this* firmware does not decrypt protects nothing against someone holding
+the hardware.
+
+That case is rare and mostly unwanted anyway: you can only block a private channel if you are a
+member of it, and then you would usually rather relay its traffic than drop it. **Recommendation: use
+this stage for public channels**, and enter a private key only after a deliberate judgement about one
+specific device in one specific place.
 
 ---
 
