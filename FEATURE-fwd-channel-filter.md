@@ -238,18 +238,32 @@ HMAC computed over the wrong byte range — all three break the suite. 10/10 gre
 
 ## Test plan (bench, mirroring the fwdfilter3/4 validation)
 
-1. CLI: set/get/unblock round-trip, both `#name` and raw-hex forms, clamp at `FWD_CHAN_MAX`.
-2. Persist: reboot, values survive (TLV 0x60–0x63); an old `/fwd_prefs` still loads with the filter off.
-3. Zero-cost when off: `chan_count = 0` → forwarding counters identical to fwdfilter9 under load.
-4. **Positive:** companion joins `#benchtest`, sends group messages; repeater with that channel blocked
-   drops them, `get fwd.chan.stats` climbs, other traffic unaffected.
-5. ✅ **Negative control — done in CI, see above.** For the bench, repeat it live with the colliding
-   name the generator produces: `#bench89` derives to the same wire hash `0xD9` as `#test`
-   (`SHA256(SHA256("#name")[0:16])[0]` — note the `#` and the 16-byte truncation; an earlier draft
-   of this line wrote `SHA256(SHA256(name))[0]`, which is neither).
-6. Airtime: measure `saved_air` against the drop count and the corrected SF8 airtime model.
-7. **CPU on the forwarding path** — one HMAC-SHA256 per hash-byte match. Measure on **both** a RAK4631
-   (CC310 hardware) and a Heltec V3 (software); this is the only risk left that the bench must answer.
+Run on the bench RAK4631 (COM12) against the Heltec V3 companion (COM3), 2026-08-17.
+
+1. ✅ **CLI round-trip.** `#name` and raw-hex (32- and 64-hex) forms, label argument, bad input
+   rejected, duplicate `set` updates rather than appends, clamp at `FWD_CHAN_MAX` (9th entry →
+   `Error: table full`), `unblock` by name, by index and by raw key, a miss reporting `0 removed`.
+   **The device derived the same hashes as the live traffic**, independently of the host script:
+   `#test` `D9` · `#austria` `FB` · `#ping` `28` · `#vienna` `DD` · `#hungary` `2F` ·
+   `#slovakia` `B2` · the mainline `Public` PSK `11`.
+2. ✅ **Persistence.** 8 entries with labels and cached hashes survived a reboot unchanged
+   (TLV 0x60–0x63).
+3. ✅ **Zero-cost when off.** `chan_count = 0`: `blocked=0`, forwarding counters advance normally.
+4. ✅ **Positive, over the air.** Companion on `#benchtest` (wire hash `0B`), repeater blocking it:
+   3 sent → `blocked=3 saved_air=1401ms`, and `fwd_unscoped` did **not** move — every one dropped,
+   none forwarded.
+5. ✅ **Negative control, over the air — the test the design exists for.** Second channel
+   `#bcol169`, brute-forced to the **same** wire hash `0B`, still unblocked. 3 sent → `blocked`
+   stayed at **3** and `fwd_unscoped` went 10 → 13: all three **forwarded**. A hash-only filter
+   drops all six. (Also proven in CI on `#test`/`#bench89`, both `0xD9` — see Pre-flight.)
+   Derivation for a collider: `SHA256(SHA256("#name")[0:16])[0]` — note the `#` and the 16-byte
+   truncation; an earlier draft of this line wrote `SHA256(SHA256(name))[0]`, which is neither.
+6. ✅ **Airtime.** 1401 ms over 3 drops = 467 ms/packet, against 488 ms for a 55-byte frame from the
+   corrected SF8 model — the counter is billing real time-on-air, not a guess.
+7. ⬜ **CPU on the forwarding path** — one HMAC-SHA256 per hash-byte match. **Not measured.** The
+   structural bound holds (the byte compare rejects first, and `FWD_CHAN_MAX` caps the rest), and
+   nothing anomalous showed on either board, but that is an argument, not a measurement. Needs
+   instrumented timing on a RAK4631 (CC310) **and** a Heltec V3 (software) before release.
 
 ## Open
 

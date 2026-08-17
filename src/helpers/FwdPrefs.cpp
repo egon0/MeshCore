@@ -53,6 +53,10 @@ void FwdPrefs::reset() {
   flood_max_anon_request = 64;
   flood_max_response = 64;
   scoped_reserve_pct = 0;   // off by default -> backward-compatible no-op
+  chan_count = 0;
+  memset(chan_keys, 0, sizeof(chan_keys));
+  memset(chan_hash, 0, sizeof(chan_hash));
+  memset(chan_label, 0, sizeof(chan_label));
 }
 
 void FwdPrefs::sanitise() {
@@ -66,6 +70,10 @@ void FwdPrefs::sanitise() {
   if (flood_max_anon_request > 64) flood_max_anon_request = 64;
   if (flood_max_response > 64) flood_max_response = 64;
   if (scoped_reserve_pct > 100) scoped_reserve_pct = 100;
+  if (chan_count > FWD_CHAN_MAX) chan_count = 0;             // corrupt -> drop table
+  for (int i = 0; i < FWD_CHAN_MAX; i++) {
+    chan_label[i][FWD_CHAN_LABEL_LEN - 1] = 0;   // a corrupt file must not hand sprintf an unterminated string
+  }
 }
 
 void FwdPrefs::load(FILESYSTEM* fs) {
@@ -106,6 +114,10 @@ void FwdPrefs::load(FILESYSTEM* fs) {
       case FWD_TAG_FM_ANON_REQUEST: fwd_read_u8(file, len, &flood_max_anon_request); break;
       case FWD_TAG_FM_RESPONSE:     fwd_read_u8(file, len, &flood_max_response); break;
       case FWD_TAG_SCOPED_RESERVE:  fwd_read_u8(file, len, &scoped_reserve_pct); break;
+      case FWD_TAG_CHAN_COUNT:      fwd_read_u8(file, len, &chan_count); break;
+      case FWD_TAG_CHAN_KEYS:       fwd_read_blob(file, len, (uint8_t*)chan_keys, sizeof(chan_keys)); break;
+      case FWD_TAG_CHAN_HASH:       fwd_read_blob(file, len, chan_hash, sizeof(chan_hash)); break;
+      case FWD_TAG_CHAN_LABEL:      fwd_read_blob(file, len, (uint8_t*)chan_label, sizeof(chan_label)); break;
       default:                      fwd_skip(file, len); break;   // unknown tag -> forward-compat skip
     }
   }
@@ -146,6 +158,11 @@ void FwdPrefs::save(FILESYSTEM* fs) const {
   fwd_write_u8(file, FWD_TAG_FM_RESPONSE, flood_max_response);
 
   fwd_write_u8(file, FWD_TAG_SCOPED_RESERVE, scoped_reserve_pct);
+
+  fwd_write_u8(file, FWD_TAG_CHAN_COUNT, chan_count);
+  fwd_write_tlv(file, FWD_TAG_CHAN_KEYS, (const uint8_t*)chan_keys, (uint16_t)chan_count * FWD_KEY_SIZE);
+  fwd_write_tlv(file, FWD_TAG_CHAN_HASH, chan_hash, (uint16_t)chan_count);
+  fwd_write_tlv(file, FWD_TAG_CHAN_LABEL, (const uint8_t*)chan_label, (uint16_t)chan_count * FWD_CHAN_LABEL_LEN);
 
   file.close();
 }

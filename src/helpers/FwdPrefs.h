@@ -3,6 +3,7 @@
 #include <Arduino.h>               // uint8_t / uint16_t
 #include <Mesh.h>
 #include <helpers/IdentityStore.h> // defines FILESYSTEM + the platform File type (same chain CommonCLI.h uses)
+#include <helpers/ChannelFilter.h> // FWD_CHAN_MAX / FWD_CHAN_LABEL_LEN live with the matching logic
 
 // ---------------------------------------------------------------------------
 // Fork-private forward-filter preferences.
@@ -48,6 +49,10 @@
 #define FWD_TAG_FM_ANON_REQUEST  0x41
 #define FWD_TAG_FM_RESPONSE      0x42
 #define FWD_TAG_SCOPED_RESERVE   0x50
+#define FWD_TAG_CHAN_COUNT       0x60
+#define FWD_TAG_CHAN_KEYS        0x61
+#define FWD_TAG_CHAN_HASH        0x62
+#define FWD_TAG_CHAN_LABEL       0x63
 
 struct FwdPrefs {
   // -- hash-size filter (Stage 1) --
@@ -72,6 +77,12 @@ struct FwdPrefs {
 
   // -- airtime reserve (Stage 4): drop unscoped floods under TX-budget pressure so scoped keeps its slice --
   uint8_t scoped_reserve_pct;     // 0..100 = % of TX airtime budget reserved for scoped-only (0 = off/default)
+
+  // -- channel blocklist (Stage 5): drop group traffic whose MAC verifies under a stored channel key --
+  uint8_t chan_count;                             // active entries (0..FWD_CHAN_MAX); 0 = off/default
+  uint8_t chan_keys[FWD_CHAN_MAX][FWD_KEY_SIZE];  // channel secret, as GroupChannel::secret (16 B zero-padded to 32)
+  uint8_t chan_hash[FWD_CHAN_MAX];                // channelWireHash(key), cached so the hot path never hashes
+  char    chan_label[FWD_CHAN_MAX][FWD_CHAN_LABEL_LEN];  // display only; "" for a raw-key entry
 
   void reset();                   // set all fields to defaults (off / empty / cap 64)
   void sanitise();                // clamp out-of-range values after a load

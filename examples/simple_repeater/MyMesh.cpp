@@ -509,6 +509,27 @@ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
       return false;
     }
   }
+  // [fwd-filter Stage 5] Channel blocklist: drop group traffic belonging to a channel the operator
+  // configured. Identified by verifying the packet's MAC under the stored channel secret -- the
+  // 1-byte wire hash alone is not selective (244 of 256 values occupied in the live mesh), so a
+  // hash-only filter would drop unrelated channels. Nothing on this path decrypts; see
+  // helpers/ChannelFilter.h. chan_count = 0 => no-op (default), and the byte compare rejects
+  // almost everything before any HMAC runs.
+  if (_fwd_prefs.chan_count > 0 && packet->isRouteFlood()
+      && (packet->getPayloadType() == PAYLOAD_TYPE_GRP_TXT
+          || packet->getPayloadType() == PAYLOAD_TYPE_GRP_DATA)) {
+    int idx = mesh::findBlockedChannel(packet->payload, packet->payload_len,
+                                       _fwd_prefs.chan_keys, _fwd_prefs.chan_hash,
+                                       _fwd_prefs.chan_count);
+    if (idx >= 0) {
+      n_drop_chan++;
+      airtime_saved_chan += _radio->getEstAirtimeFor(packet->getRawLength());
+      MESH_DEBUG_PRINTLN("fwd-filter: drop group packet on blocked channel %s (hash %02X)",
+                         _fwd_prefs.chan_label[idx][0] ? _fwd_prefs.chan_label[idx] : "(raw key)",
+                         (uint32_t)_fwd_prefs.chan_hash[idx]);
+      return false;
+    }
+  }
   // [fwd-filter Stage 4] Airtime reserve: under sustained TX-budget pressure, drop UNSCOPED floods so the
   // reserved slice of the duty-cycle budget stays free for scoped delivery. Scoped floods (non-wildcard
   // region) and direct traffic bypass. scoped_reserve_pct=0 => no-op (default). Counts the forward/drop mix.
@@ -1019,6 +1040,8 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   recv_pkt_region = NULL;
   n_fwd_scoped = n_fwd_unscoped = n_drop_unscoped = 0;
   airtime_saved_unscoped = 0;
+  n_drop_chan = 0;
+  airtime_saved_chan = 0;
   air_win_start = air_win_base = 0;
 
 #if MAX_NEIGHBOURS
@@ -1550,6 +1573,82 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
     } else if (memcmp(config, "fwd.scoped.reserve ", 19) == 0) {
       _fwd_prefs.scoped_reserve_pct = constrain(atoi(&config[19]), 0, 100);
       _fwd_prefs.save(_fs); strcpy(reply, "OK");
+    } else if (memcmp(config, "fwd.chan.block ", 15) == 0) {
+      char buf[160];
+      strncpy(buf, &config[15], sizeof(buf) - 1); buf[sizeof(buf) - 1] = 0;
+      char* sp = strchr(buf, ' ');
+      const char* label = NULL;
+      if (sp) { *sp = 0; label = sp + 1; }
+
+      uint8_t key[FWD_KEY_SIZE];
+      memset(key, 0, sizeof(key));
+      int hexlen = strlen(buf);
+      bool ok;
+      if (buf[0] == '#') {
+        mesh::deriveChannelKey(buf, key);       // public hashtag channel: key is SHA256 of the name
+        if (!label) label = buf;                // remember what was blocked, for `get`
+        ok = true;
+      } else if (hexlen == 32 || hexlen == 64) {
+        ok = mesh::Utils::fromHex(key, hexlen / 2, buf);   // raw PSK: 128-bit or 256-bit
+      } else {
+        ok = false;
+      }
+
+      if (!ok) {
+        strcpy(reply, "Error: need #name, or 32/64-hex key [label]");
+      } else if (_fwd_prefs.chan_count >= FWD_CHAN_MAX) {
+        strcpy(reply, "Error: table full");
+      } else {
+        int idx = -1;
+        for (int k = 0; k < _fwd_prefs.chan_count; k++)
+          if (memcmp(_fwd_prefs.chan_keys[k], key, FWD_KEY_SIZE) == 0) { idx = k; break; }
+        if (idx < 0) { idx = _fwd_prefs.chan_count++; memcpy(_fwd_prefs.chan_keys[idx], key, FWD_KEY_SIZE); }
+        // Hash and key derivation happen HERE, once. The forwarding path never hashes a name.
+        _fwd_prefs.chan_hash[idx] = mesh::channelWireHash(key);
+        memset(_fwd_prefs.chan_label[idx], 0, FWD_CHAN_LABEL_LEN);
+        if (label) {
+          strncpy(_fwd_prefs.chan_label[idx], label, FWD_CHAN_LABEL_LEN - 1);
+        }
+        _fwd_prefs.save(_fs);
+        sprintf(reply, "OK (hash %02X)", (uint32_t)_fwd_prefs.chan_hash[idx]);
+      }
+    } else if (memcmp(config, "fwd.chan.unblock ", 17) == 0) {
+      const char* arg = &config[17];
+      uint8_t key[FWD_KEY_SIZE];
+      int removed = 0;
+      int by_index = -1;
+      if (arg[0] == '#') {
+        mesh::deriveChannelKey(arg, key);
+      } else if (arg[0] >= '0' && arg[0] <= '9' && strlen(arg) <= 2) {
+        by_index = atoi(arg);                    // also accept the index shown by `get fwd.chan.block`
+      } else {
+        int hexlen = strlen(arg);
+        memset(key, 0, sizeof(key));
+        if (!(hexlen == 32 || hexlen == 64) || !mesh::Utils::fromHex(key, hexlen / 2, arg)) {
+          strcpy(reply, "Error: need #name, 32/64-hex key, or index");
+          return true;
+        }
+      }
+      for (int k = 0; k < _fwd_prefs.chan_count; ) {
+        bool hit = (by_index >= 0) ? (k == by_index)
+                                   : (memcmp(_fwd_prefs.chan_keys[k], key, FWD_KEY_SIZE) == 0);
+        if (hit) {
+          for (int j = k; j < _fwd_prefs.chan_count - 1; j++) {
+            memcpy(_fwd_prefs.chan_keys[j], _fwd_prefs.chan_keys[j + 1], FWD_KEY_SIZE);
+            _fwd_prefs.chan_hash[j] = _fwd_prefs.chan_hash[j + 1];
+            memcpy(_fwd_prefs.chan_label[j], _fwd_prefs.chan_label[j + 1], FWD_CHAN_LABEL_LEN);
+          }
+          _fwd_prefs.chan_count--; removed++;
+          break;   // indices shift; one unblock removes one entry
+        }
+        k++;
+      }
+      _fwd_prefs.save(_fs);
+      sprintf(reply, "OK (%d removed)", removed);
+    } else if (memcmp(config, "fwd.chan.clear", 14) == 0) {
+      _fwd_prefs.chan_count = 0;
+      _fwd_prefs.save(_fs);
+      strcpy(reply, "OK");
     } else {
       return false;   // not a fwd 'set' -> let CommonCLI handle it
     }
@@ -1590,6 +1689,19 @@ bool MyMesh::handleFwdCommand(char* command, char* reply) {
       sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_request);
     } else if (memcmp(config, "flood.max.response", 18) == 0) {
       sprintf(reply, "> %d", (int)_fwd_prefs.flood_max_response);
+    } else if (memcmp(config, "fwd.chan.stats", 14) == 0) {   // before the fwd.chan prefix below
+      sprintf(reply, "> blocked=%lu saved_air=%lums",
+              (unsigned long)n_drop_chan, (unsigned long)airtime_saved_chan);
+    } else if (memcmp(config, "fwd.chan", 8) == 0) {
+      char* p = reply;
+      p += sprintf(p, "> %d entr%s", (int)_fwd_prefs.chan_count, _fwd_prefs.chan_count == 1 ? "y" : "ies");
+      for (int k = 0; k < _fwd_prefs.chan_count && (p - reply) < 130; k++) {
+        // A raw-key entry has no name to show -- the wire hash is all the operator gets, because
+        // the byte is not reversible. reference/chan_filter_vectors.py names it host-side.
+        p += sprintf(p, " | %d:%s (%02X)", k,
+                     _fwd_prefs.chan_label[k][0] ? _fwd_prefs.chan_label[k] : "(raw)",
+                     (uint32_t)_fwd_prefs.chan_hash[k]);
+      }
     } else if (memcmp(config, "fwd.scoped.reserve", 18) == 0) {   // dedicated getter (set/get symmetry)
       sprintf(reply, "> %d", (int)_fwd_prefs.scoped_reserve_pct);
     } else if (memcmp(config, "fwd.scoped.stats", 16) == 0) {

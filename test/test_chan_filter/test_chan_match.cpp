@@ -14,6 +14,7 @@
 // one, and that is the entire reason the design pays for an HMAC on the forwarding path.
 #include <gtest/gtest.h>
 #include "Utils.h"
+#include "helpers/ChannelFilter.h"
 
 using namespace mesh;
 
@@ -24,19 +25,14 @@ static const char* CHAN_A = "#test";
 static const char* CHAN_B = "#bench89";
 static const uint8_t CHAN_A_WIRE_HASH = 0xD9;   // recorded from live traffic 2026-08-17
 
-// Client convention: key = SHA256(name)[0:16], zero-padded to 32. The firmware has no name
-// derivation of its own -- see FEATURE-fwd-channel-filter.md.
+// These are the shipping functions, not a re-implementation of them -- the point of putting
+// the gate in a header with no node state is that the test can call exactly what runs.
 static void derive_channel(const char* name, uint8_t secret[32]) {
-  memset(secret, 0, 32);
-  Utils::sha256(secret, 16, (const uint8_t*) name, (int) strlen(name));
+  mesh::deriveChannelKey(name, secret);
 }
 
-// setChannel picks 16 vs 32 bytes by testing whether bytes 16..31 are zero; a name-derived
-// channel is always the 16-byte case.
 static uint8_t wire_hash(const uint8_t secret[32]) {
-  uint8_t h[32];
-  Utils::sha256(h, sizeof(h), secret, 16);
-  return h[0];
+  return mesh::channelWireHash(secret);
 }
 
 // A GRP_TXT payload as Mesh.cpp:227 reads it: [0] channel hash, [1..2] MAC, [3..] ciphertext.
@@ -54,11 +50,9 @@ static GrpPacket build_packet(const uint8_t secret[32], const char* text) {
   return p;
 }
 
-// The gate as it will sit in allowPacketForward(): cheap byte compare first, HMAC only on a hit.
+// The gate exactly as allowPacketForward() calls it.
 static bool channel_matches(const uint8_t secret[32], uint8_t cached_hash, const GrpPacket& p) {
-  if (p.len < 4) return false;                    // too short for hash + MAC + data
-  if (p.payload[0] != cached_hash) return false;  // plain compare, no crypto
-  return Utils::MACMatches(secret, &p.payload[1], p.len - 1);
+  return mesh::matchesChannel(p.payload, p.len, secret, cached_hash);
 }
 
 class ChanFilter : public ::testing::Test {
@@ -166,6 +160,38 @@ TEST_F(ChanFilter, AgreesWithMACThenDecrypt) {
       int len = Utils::MACThenDecrypt(k, dest, &p->payload[1], p->len - 1);
       EXPECT_EQ(len > 0, Utils::MACMatches(k, &p->payload[1], p->len - 1));
     }
+  }
+}
+
+// findBlockedChannel() is what allowPacketForward() actually calls, with the whole table.
+TEST_F(ChanFilter, FindsTheRightEntryInATable) {
+  uint8_t keys[FWD_CHAN_MAX][32];
+  uint8_t hashes[FWD_CHAN_MAX];
+  const char* names[] = {"#austria", "#test", "#ping"};   // A is at index 1
+  for (int i = 0; i < 3; i++) {
+    derive_channel(names[i], keys[i]);
+    hashes[i] = wire_hash(keys[i]);
+  }
+  GrpPacket a = build_packet(secret_a, "mine");
+  GrpPacket b = build_packet(secret_b, "not mine");
+
+  EXPECT_EQ(findBlockedChannel(a.payload, a.len, keys, hashes, 3), 1);
+  EXPECT_EQ(findBlockedChannel(b.payload, b.len, keys, hashes, 3), -1)
+      << "the colliding channel matched an entry in the table";
+  EXPECT_EQ(findBlockedChannel(a.payload, a.len, keys, hashes, 1), -1)
+      << "count must bound the scan; entry 1 was consulted with count=1";
+  EXPECT_EQ(findBlockedChannel(a.payload, a.len, keys, hashes, 0), -1)
+      << "an empty table must match nothing -- this is the zero-cost default";
+}
+
+TEST_F(ChanFilter, EmptyTableAndShortPayloadsAreSafe) {
+  uint8_t keys[FWD_CHAN_MAX][32];
+  uint8_t hashes[FWD_CHAN_MAX];
+  derive_channel(CHAN_A, keys[0]);
+  hashes[0] = wire_hash(keys[0]);
+  GrpPacket p = build_packet(secret_a, "x");
+  for (int len = 0; len < CHAN_PAYLOAD_MIN_LEN; len++) {
+    EXPECT_EQ(findBlockedChannel(p.payload, len, keys, hashes, 1), -1) << "len " << len;
   }
 }
 

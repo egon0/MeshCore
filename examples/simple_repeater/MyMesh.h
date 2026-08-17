@@ -104,6 +104,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   // aggregate externally (observer polls `get fwd.scoped.stats` / MQTT) -- the reboot reset is not data loss.
   uint32_t n_fwd_scoped, n_fwd_unscoped, n_drop_unscoped;
   uint32_t airtime_saved_unscoped;   // ms of estimated airtime saved by dropping unscoped floods
+  uint32_t n_drop_chan;              // group packets dropped by the Stage 5 channel blocklist
+  uint32_t airtime_saved_chan;       // ms of estimated airtime saved by those drops
   // Short TX-airtime window backing the scoped reserve (see airWindowUsed()). Tumbling, not rolling:
   // cheap, and one window of lag is irrelevant next to the hour it replaces.
   unsigned long air_win_start;       // millis at the start of the current window (0 = not yet started)
