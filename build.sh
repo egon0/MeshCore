@@ -218,6 +218,7 @@ build_all_firmwares_by_suffix() {
 FORK_REPEATER_TARGETS=(
   "RAK_4631_repeater"         # hardware-tested
   "Heltec_v3_repeater"        # hardware-tested
+  "Heltec_v4_repeater"        # untested
   "SenseCap_Solar_repeater"   # build-validated only: nRF52840+SX1262, RAK4631-class, no P1 on hand
 )
 
