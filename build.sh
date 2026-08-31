@@ -221,6 +221,7 @@ FORK_REPEATER_TARGETS=(
   "heltec_v4_repeater"        # untested
   "ProMicro_repeater"         # untested
   "Heltec_t114_repeater"      # untested
+  "Heltec_t114_without_display_repeater" # untested
   "SenseCap_Solar_repeater"   # build-validated only: nRF52840+SX1262, RAK4631-class, no P1 on hand
 )
 
